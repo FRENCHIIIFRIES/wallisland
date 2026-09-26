@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Wallisland</string>
+    <string name="tile_label">Island</string>
+</resources>

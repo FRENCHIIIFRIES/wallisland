@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!-- Sideloaded utility: these are deliberate. -->
+    <issue id="BatteryLife" severity="ignore" />
+    <issue id="QueryAllPackagesPermission" severity="ignore" />
+    <issue id="DiscouragedApi" severity="ignore" />
+    <issue id="SetTextI18n" severity="ignore" />
+    <issue id="OldTargetApi" severity="ignore" />
+    <issue id="GradleDependency" severity="ignore" />
+    <issue id="AndroidGradlePluginVersion" severity="ignore" />
+</lint>
