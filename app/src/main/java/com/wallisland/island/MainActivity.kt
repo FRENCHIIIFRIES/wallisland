@@ -214,6 +214,8 @@ class MainActivity : Activity() {
         card.addView(divider())
         card.addView(toggleRow("Hide in landscape", null, prefs.hideLandscape) { prefs.hideLandscape = it })
         card.addView(divider())
+        card.addView(toggleRow("Hide while recording", "Camera and recorder apps. Stays during video calls", prefs.hideWhileCapturing) { prefs.hideWhileCapturing = it })
+        card.addView(divider())
         card.addView(toggleRow("Haptics", null, prefs.haptics) { prefs.haptics = it })
         col.addView(card)
     }
@@ -236,11 +238,13 @@ class MainActivity : Activity() {
         card.addView(sliderRow("Height", 18, 48, prefs.height, "dp") { prefs.height = it })
         card.addView(sliderRow("Move left / right", -60, 60, prefs.offsetX, "dp") { prefs.offsetX = it })
         card.addView(sliderRow("Move up / down", -30, 40, prefs.offsetY, "dp") { prefs.offsetY = it })
+        card.addView(sliderRow("Opacity", 40, 100, prefs.opacity, "%") { prefs.opacity = it })
         card.addView(sliderRow("Notification time", 2, 10, prefs.noticeSeconds, "s", live = false) { prefs.noticeSeconds = it })
         val reset = pillButton(this, "Reset size") {
             prefs.width = Prefs.DEFAULT_WIDTH; prefs.height = Prefs.DEFAULT_HEIGHT
             prefs.offsetX = Prefs.DEFAULT_OFFSET_X; prefs.offsetY = Prefs.DEFAULT_OFFSET_Y
             prefs.noticeSeconds = Prefs.DEFAULT_NOTICE_SECONDS
+            prefs.opacity = Prefs.DEFAULT_OPACITY
             recreate()
         }
         card.addView(FrameLayout(this).apply {

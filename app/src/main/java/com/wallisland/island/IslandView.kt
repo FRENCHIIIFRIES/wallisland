@@ -120,6 +120,10 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
     // ---- Paint -----------------------------------------------------------------------------------------
 
     private val pill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Look.BLACK }
+    private val rim = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        color = Look.WHITE
+    }
     private val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val labelPaint = textPaint(Look.dot(context), 11f, Look.GREY).apply {
         fontVariationSettings = "'wght' 800, 'ROND' 100"
@@ -426,8 +430,18 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         val cx = width / 2f
         pillRect.set(cx - w / 2f, 0f, cx + w / 2f, h)
         val r = min(h / 2f, context.dp(38f))
+        val opacity = prefs.opacity.coerceIn(40, 100) / 100f
         pill.alpha = (255 * a).roundToInt()
+        pill.shader = if (opacity < 1f) glassShader(opacity) else null
         canvas.drawRoundRect(pillRect, r, r, pill)
+        if (opacity < 1f) {
+            // A faint hairline keeps a see-through island's edge crisp over busy backgrounds.
+            rim.strokeWidth = context.dp(0.8f)
+            rim.alpha = (255 * a * 0.14f).roundToInt()
+            val inset = rim.strokeWidth / 2f
+            box.set(pillRect.left + inset, pillRect.top + inset, pillRect.right - inset, pillRect.bottom - inset)
+            canvas.drawRoundRect(box, r - inset, r - inset, rim)
+        }
 
         val ca = contentAlpha * a
         if (ca <= 0.01f) return
@@ -445,6 +459,29 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             Mode.RINGER -> (shownTransient as? Transient.RingerT)?.let { drawRinger(canvas, it.mode, alpha) }
         }
         canvas.restore()
+    }
+
+    private var glass: android.graphics.LinearGradient? = null
+    private var glassKey = 0L
+
+    /**
+     * See-through below the status-bar strip, nearly solid across it, so status-bar icons don't bleed
+     * through behind the island's own header. Cached while the geometry stays the same.
+     */
+    private fun glassShader(opacity: Float): android.graphics.Shader {
+        val top = pillRect.top
+        val solidTo = top + topZone
+        val fadeTo = solidTo + context.dp(14f)
+        val key = (solidTo.toLong() shl 20) xor (fadeTo.toLong() shl 8) xor (opacity * 100).toLong()
+        glass?.let { if (key == glassKey) return it }
+        val solid = (0.97f * 255).roundToInt() shl 24
+        val clear = (opacity * 255).roundToInt() shl 24
+        return android.graphics.LinearGradient(
+            0f, solidTo - context.dp(4f), 0f, fadeTo, solid, clear, android.graphics.Shader.TileMode.CLAMP,
+        ).also {
+            glass = it
+            glassKey = key
+        }
     }
 
     private val idleHalf get() = context.dp(prefs.width.toFloat()) / 2f

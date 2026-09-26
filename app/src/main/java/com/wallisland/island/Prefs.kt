@@ -29,6 +29,10 @@ class Prefs(context: Context) {
     var dotArt by bool("dot_art", true)
     var dotColor by bool("dot_color", true)
     var autoAlign by bool("auto_align", true)
+    var hideWhileCapturing by bool("hide_capturing", true)
+
+    /** Background opacity of the island, in percent. */
+    var opacity by int("opacity", DEFAULT_OPACITY)
 
     /** Idle pill size in dp. */
     var width by int("width", DEFAULT_WIDTH)
@@ -72,5 +76,6 @@ class Prefs(context: Context) {
         const val DEFAULT_OFFSET_X = 17
         const val DEFAULT_OFFSET_Y = 0
         const val DEFAULT_NOTICE_SECONDS = 5
+        const val DEFAULT_OPACITY = 85
     }
 }

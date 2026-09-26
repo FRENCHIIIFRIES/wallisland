@@ -16,7 +16,10 @@ import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.hardware.display.DisplayManager
+import android.hardware.camera2.CameraManager
 import android.media.AudioManager
+import android.media.AudioRecordingConfiguration
+import android.media.MediaRecorder
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
@@ -75,6 +78,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         attachIsland()
         attachTracker()
         registerReceivers()
+        registerCaptureWatchers()
         prefs.sp.registerOnSharedPreferenceChangeListener(this)
         IslandHub.listener = this
     }
@@ -98,6 +102,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         if (receiversOn) {
             unregisterReceiver(receiver)
             receiversOn = false
+            unregisterCaptureWatchers()
         }
         main.removeCallbacksAndMessages(null)
         island?.let { it.release(); removeView(it) }
@@ -305,7 +310,8 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         val hideFs = prefs.hideFullscreen && fullscreen
         val hideLand = prefs.hideLandscape && landscape
-        island?.setHidden(hideFs || hideLand)
+        val hideCap = prefs.hideWhileCapturing && capturing && !inCall()
+        island?.setHidden(hideFs || hideLand || hideCap)
         val layer = if (windowType == WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY) {
             "above the status bar"
         } else {
@@ -316,6 +322,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
             !prefs.enabled -> "Off"
             hideFs -> "Hidden: a full-screen app is open"
             hideLand -> "Hidden: landscape"
+            hideCap -> "Hidden: the camera or a recorder is in use"
             else -> "Showing, $layer"
         }
     }
@@ -412,6 +419,87 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
 
     override fun onCall(call: CallInfo?) {
         island?.setCall(call)
+        updateHidden()
+    }
+
+    // ---- Camera / recorder detection -----------------------------------------------------------------------
+
+    /** Camera IDs another app currently has open. */
+    private val camerasInUse = HashSet<String>()
+    private var recordingsInUse = emptyList<AudioRecordingConfiguration>()
+    private var capturing = false
+
+    private val cameraCallback = object : CameraManager.AvailabilityCallback() {
+        override fun onCameraUnavailable(cameraId: String) {
+            camerasInUse += cameraId
+            recheckCapture()
+        }
+
+        override fun onCameraAvailable(cameraId: String) {
+            camerasInUse -= cameraId
+            recheckCapture()
+        }
+    }
+
+    private val recordingCallback = object : AudioManager.AudioRecordingCallback() {
+        override fun onRecordingConfigChanged(configs: MutableList<AudioRecordingConfiguration>?) {
+            recordingsInUse = configs.orEmpty().toList()
+            recheckCapture()
+        }
+    }
+
+    private val applyCapture = Runnable {
+        capturing = true
+        updateHidden()
+    }
+
+    private fun registerCaptureWatchers() {
+        try {
+            getSystemService(CameraManager::class.java)?.registerAvailabilityCallback(cameraCallback, main)
+        } catch (_: Exception) {
+        }
+        val am = getSystemService(AudioManager::class.java) ?: return
+        try {
+            am.registerAudioRecordingCallback(recordingCallback, main)
+            recordingsInUse = am.activeRecordingConfigurations
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun unregisterCaptureWatchers() {
+        try {
+            getSystemService(CameraManager::class.java)?.unregisterAvailabilityCallback(cameraCallback)
+            getSystemService(AudioManager::class.java)?.unregisterAudioRecordingCallback(recordingCallback)
+        } catch (_: Exception) {
+        }
+    }
+
+    /**
+     * Camera open, or the mic recording as a camcorder/voice recorder would. Hiding waits a moment so
+     * a quick face-unlock blink doesn't flash the island away; showing again is immediate.
+     */
+    private fun recheckCapture() {
+        val recorder = recordingsInUse.any {
+            it.clientAudioSource == MediaRecorder.AudioSource.MIC ||
+                it.clientAudioSource == MediaRecorder.AudioSource.CAMCORDER ||
+                it.clientAudioSource == MediaRecorder.AudioSource.UNPROCESSED
+        }
+        val now = camerasInUse.isNotEmpty() || recorder
+        main.removeCallbacks(applyCapture)
+        if (now) {
+            if (!capturing) main.postDelayed(applyCapture, 800)
+        } else if (capturing) {
+            capturing = false
+            updateHidden()
+        }
+    }
+
+    /** Video and voice calls keep the island: a call notification, call audio mode, or a call-style mic. */
+    private fun inCall(): Boolean {
+        if (IslandHub.call != null) return true
+        if (recordingsInUse.any { it.clientAudioSource == MediaRecorder.AudioSource.VOICE_COMMUNICATION }) return true
+        val mode = getSystemService(AudioManager::class.java)?.mode
+        return mode == AudioManager.MODE_IN_CALL || mode == AudioManager.MODE_IN_COMMUNICATION
     }
 
     override fun onMedia(media: MediaInfo?) {

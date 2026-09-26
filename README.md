@@ -44,7 +44,10 @@ design language: black, white, one red, and dots everywhere.
   asks to be rebound if an OEM skin drops it.
 - A one-tap request for unrestricted battery use in settings.
 - A Quick Settings tile to switch it on and off.
-- It hides for full-screen video and games, and in landscape. Both can be turned off.
+- It hides for full-screen video and games, in landscape, and while the camera or a voice recorder
+  is in use (but stays during video and voice calls). Each can be turned off.
+- **Opacity** slider (85% by default): the island is slightly see-through, with a near-solid top strip
+  so status-bar icons never show through behind it.
 - It centres on the front-camera cut-out automatically. Settings shows exactly where it found the
   camera, and **Fit to camera** sizes the pill around it. You can fine-tune everything with live
   preview.
