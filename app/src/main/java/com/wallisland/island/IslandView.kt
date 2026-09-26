@@ -991,7 +991,8 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
 
         /** Half-width kept clear around the camera hole in compact states. */
         private const val CAMERA_CLEAR_DP = 16f
-        private const val PAUSE_LINGER_MS = 60_000L
+        // Just long enough to ride out the brief pause some players report between tracks.
+        private const val PAUSE_LINGER_MS = 1_500L
         private const val FADE_OUT_MS = 90f
         private const val FADE_IN_MS = 200f
         private const val FADE_IN_DELAY_MS = 40f
