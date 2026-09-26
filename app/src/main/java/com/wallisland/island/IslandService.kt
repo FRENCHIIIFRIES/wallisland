@@ -581,7 +581,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
             if (!audioReady) return
             val d = added.firstOrNull { it.isSink && it.type in BT_AUDIO_TYPES } ?: return
             val name = d.productName?.toString()?.trim().orEmpty()
-            val battery = budsBatteryFor(d.address)
+            val battery = if (Build.VERSION.SDK_INT >= 28) budsBatteryFor(d.address) else -1
             IslandHub.budsLog = "Last: ${name.ifEmpty { "Bluetooth audio" }}, battery " +
                 (if (battery >= 0) "$battery%" else "unknown" + if (!hasBtPermission()) " (Nearby devices not allowed)" else "")
             budsShownAt = SystemClock.uptimeMillis()
