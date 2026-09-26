@@ -492,7 +492,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         val dotted = prefs.dotArt
         val dots = if (small) mediaArtSmall else mediaArt
         when {
-            dotted && dots != null -> dots.draw(canvas, b, dotPaint, round = small, alpha = alpha)
+            dotted && dots != null -> dots.draw(canvas, b, dotPaint, round = small, alpha = alpha, colored = prefs.dotColor)
             !dotted && mediaPicture != null ->
                 mediaPicture!!.draw(canvas, b, if (small) b.width() / 2f else context.dp(12f), alpha)
             else -> {
@@ -514,6 +514,12 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         }
     }
 
+    /** Equaliser dots take the cover's accent colour when colour dots are on. */
+    private fun eqColor(): Int = if (prefs.dotColor) mediaArt?.accent ?: Look.WHITE else Look.WHITE
+
+    /** The peak dot: red on a white equaliser, white on a coloured one. */
+    private fun eqPeak(): Int = if (eqColor() == Look.WHITE) Look.RED else Look.WHITE
+
     /** A fake-but-convincing equaliser: dot columns breathing on offset sine waves. */
     private fun drawVisualizer(canvas: Canvas, right: Float, cy: Float, pitch: Float, cols: Int, rows: Int, playing: Boolean, alpha: Int) {
         val t = SystemClock.uptimeMillis() / 1000f
@@ -530,8 +536,8 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
                 dotPaint.color = when {
                     !lit -> Look.DOT_OFF
                     !playing -> Look.GREY
-                    row == rows - level && level == rows -> Look.RED
-                    else -> Look.WHITE
+                    row == rows - level && level == rows -> eqPeak()
+                    else -> eqColor()
                 }
                 dotPaint.alpha = alpha
                 canvas.drawCircle(left + pitch * (c + 0.5f), top + pitch * (row + 0.5f), r, dotPaint)
@@ -645,7 +651,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             val isHead = dur > 0 && i == head
             dotPaint.color = when {
                 isHead -> Look.RED
-                dur > 0 && i < head -> Look.WHITE
+                dur > 0 && i < head -> eqColor()
                 else -> Look.DOT_OFF
             }
             dotPaint.alpha = alpha

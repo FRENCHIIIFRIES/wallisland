@@ -207,6 +207,8 @@ class MainActivity : Activity() {
         val card = card()
         card.addView(toggleRow("Dot art", "Render album art and avatars as halftone dots", prefs.dotArt) { prefs.dotArt = it })
         card.addView(divider())
+        card.addView(toggleRow("Colour dots", "Dot art and the equaliser take their colours from the album cover", prefs.dotColor) { prefs.dotColor = it })
+        card.addView(divider())
         card.addView(toggleRow("Hide in full screen", "Videos and games", prefs.hideFullscreen) { prefs.hideFullscreen = it })
         card.addView(divider())
         card.addView(toggleRow("Hide in landscape", null, prefs.hideLandscape) { prefs.hideLandscape = it })

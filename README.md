@@ -22,6 +22,8 @@ design language: black, white, one red, and dots everywhere.
   - Drag along the dotted progress bar to scrub, or tap to jump.
   - Back 10 s, previous, play / pause, next and forward 10 s, all as dot-matrix buttons.
   - Tap the album art to switch between the real cover and the dot-matrix version.
+  - **Colour dots** (on by default): the dot art is a colour halftone of the cover, and the equaliser
+    and progress bar take the cover's strongest colour. Turn it off for classic white dots.
   - Tap the song title to open the music app.
 - **Notifications.** Only alerts that would make a sound open the island. Chats show the latest
   message. Tap to open the notification, or swipe up to dismiss it.

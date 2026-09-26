@@ -3,6 +3,7 @@ package com.wallisland.island
 import android.graphics.Bitmap
 import android.graphics.BitmapShader
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
@@ -12,11 +13,16 @@ import android.graphics.Shader
 import kotlin.math.sqrt
 
 /**
- * Turns a picture into a halftone grid of white dots, dot size following brightness.
+ * Turns a picture into a halftone grid of dots, dot size following brightness. Dots are white, or
+ * (when [draw] is asked for colour) tinted with the picture's own colours, like a colour halftone print.
  * Album art and avatars become part of the dot-matrix look instead of fighting it.
  */
 class DotArt(source: Bitmap, private val grid: Int) {
     private val levels = FloatArray(grid * grid)
+    private val colors = IntArray(grid * grid)
+
+    /** The cover's most vivid colour, brightened to read on black. Used to tint the equaliser. */
+    val accent: Int
 
     init {
         val small = Bitmap.createScaledBitmap(source.copyIfHardware(), grid, grid, true)
@@ -31,14 +37,16 @@ class DotArt(source: Bitmap, private val grid: Int) {
             levels[i] = l
             if (l < lo) lo = l
             if (l > hi) hi = l
+            colors[i] = vivid(c)
         }
+        accent = pickAccent(px)
         // Stretch contrast so dark covers still produce a readable pattern.
         val span = (hi - lo).coerceAtLeast(0.15f)
         for (i in levels.indices) levels[i] = ((levels[i] - lo) / span).coerceIn(0f, 1f)
         if (small !== source) small.recycle()
     }
 
-    fun draw(canvas: Canvas, box: RectF, paint: Paint, round: Boolean, alpha: Int) {
+    fun draw(canvas: Canvas, box: RectF, paint: Paint, round: Boolean, alpha: Int, colored: Boolean = false) {
         val pitch = box.width() / grid
         val maxR = pitch * 0.5f
         val cx0 = box.centerX()
@@ -59,7 +67,7 @@ class DotArt(source: Bitmap, private val grid: Int) {
                 paint.alpha = alpha
                 canvas.drawCircle(x, y, maxR * 0.28f, paint)
             } else {
-                paint.color = Look.WHITE
+                paint.color = if (colored) colors[row * grid + col] else Look.WHITE
                 paint.alpha = alpha
                 canvas.drawCircle(x, y, maxR * (0.3f + 0.62f * v), paint)
             }
@@ -68,6 +76,32 @@ class DotArt(source: Bitmap, private val grid: Int) {
     }
 
     companion object {
+        /** Keeps the hue, lifts saturation a touch and brightness a lot, so colours glow on black. */
+        private fun vivid(c: Int): Int {
+            val hsv = FloatArray(3)
+            Color.colorToHSV(c or (0xFF shl 24), hsv)
+            hsv[1] = (hsv[1] * 1.25f).coerceAtMost(1f)
+            hsv[2] = hsv[2].coerceAtLeast(0.72f)
+            // Near-grey pixels stay a clean white rather than a muddy tint.
+            if (hsv[1] < 0.12f) return Look.WHITE
+            return Color.HSVToColor(hsv)
+        }
+
+        private fun pickAccent(px: IntArray): Int {
+            val hsv = FloatArray(3)
+            var best = Look.WHITE
+            var bestScore = 0.18f
+            for (c in px) {
+                Color.colorToHSV(c or (0xFF shl 24), hsv)
+                val score = hsv[1] * (0.35f + 0.65f * hsv[2])
+                if (score > bestScore) {
+                    bestScore = score
+                    best = c
+                }
+            }
+            return if (best == Look.WHITE) Look.WHITE else vivid(best)
+        }
+
         private fun Bitmap.copyIfHardware(): Bitmap =
             if (config == Bitmap.Config.HARDWARE) copy(Bitmap.Config.ARGB_8888, false) else this
     }

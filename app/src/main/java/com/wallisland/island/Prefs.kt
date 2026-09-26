@@ -27,6 +27,7 @@ class Prefs(context: Context) {
     var hideLandscape by bool("hide_landscape", true)
     var haptics by bool("haptics", true)
     var dotArt by bool("dot_art", true)
+    var dotColor by bool("dot_color", true)
     var autoAlign by bool("auto_align", true)
 
     /** Idle pill size in dp. */
