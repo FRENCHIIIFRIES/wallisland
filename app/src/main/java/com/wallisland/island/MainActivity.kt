@@ -235,7 +235,9 @@ class MainActivity : Activity() {
         card.addView(sliderRow("Move up / down", -30, 40, prefs.offsetY, "dp") { prefs.offsetY = it })
         card.addView(sliderRow("Notification time", 2, 10, prefs.noticeSeconds, "s", live = false) { prefs.noticeSeconds = it })
         val reset = pillButton(this, "Reset size") {
-            prefs.width = Prefs.DEFAULT_WIDTH; prefs.height = Prefs.DEFAULT_HEIGHT; prefs.offsetX = 0; prefs.offsetY = 0; prefs.noticeSeconds = 4
+            prefs.width = Prefs.DEFAULT_WIDTH; prefs.height = Prefs.DEFAULT_HEIGHT
+            prefs.offsetX = Prefs.DEFAULT_OFFSET_X; prefs.offsetY = Prefs.DEFAULT_OFFSET_Y
+            prefs.noticeSeconds = Prefs.DEFAULT_NOTICE_SECONDS
             recreate()
         }
         card.addView(FrameLayout(this).apply {

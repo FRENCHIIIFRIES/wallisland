@@ -34,8 +34,8 @@ class Prefs(context: Context) {
     var height by int("height", DEFAULT_HEIGHT)
 
     /** Fine-tuning on top of the auto camera alignment, in dp. */
-    var offsetX by int("offset_x", 0)
-    var offsetY by int("offset_y", 0)
+    var offsetX by int("offset_x", DEFAULT_OFFSET_X)
+    var offsetY by int("offset_y", DEFAULT_OFFSET_Y)
 
     /**
      * The front camera as measured by the settings screen, in px of a display [cameraScreenW] wide.
@@ -46,7 +46,7 @@ class Prefs(context: Context) {
     var cameraScreenW by int("camera_screen_w", -1)
 
     /** How long a notification stays open, in seconds. */
-    var noticeSeconds by int("notice_seconds", 4)
+    var noticeSeconds by int("notice_seconds", DEFAULT_NOTICE_SECONDS)
 
     private fun bool(key: String, def: Boolean) = object : kotlin.properties.ReadWriteProperty<Any?, Boolean> {
         override fun getValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>) = sp.getBoolean(key, def)
@@ -65,8 +65,11 @@ class Prefs(context: Context) {
     companion object {
         const val KEY_ENABLED = "enabled"
 
-        /** A short, chunky pill around the camera hole. */
-        const val DEFAULT_WIDTH = 68
-        const val DEFAULT_HEIGHT = 32
+        /** Tuned by hand on a Nothing Phone (3a): a chunky pill that sits right on the camera. */
+        const val DEFAULT_WIDTH = 101
+        const val DEFAULT_HEIGHT = 33
+        const val DEFAULT_OFFSET_X = 17
+        const val DEFAULT_OFFSET_Y = 0
+        const val DEFAULT_NOTICE_SECONDS = 5
     }
 }
