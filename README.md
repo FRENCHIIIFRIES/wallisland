@@ -17,7 +17,7 @@ design language: black, white, one red, and dots everywhere.
 ## What it does
 
 - **Now playing.** Halftone dot album art and a dot equaliser on either side of the camera while music
-  plays; it disappears when you pause. Tap to
+  plays; it disappears 5 seconds after you pause. Tap to
   expand into the full player:
   - Drag along the dotted progress bar to scrub, or tap to jump.
   - Back 10 s, previous, play / pause, next and forward 10 s, all as dot-matrix buttons.

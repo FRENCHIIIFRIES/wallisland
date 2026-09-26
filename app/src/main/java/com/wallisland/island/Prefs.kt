@@ -8,10 +8,10 @@ class Prefs(context: Context) {
     val sp: SharedPreferences = context.applicationContext.getSharedPreferences("island", Context.MODE_PRIVATE)
 
     init {
-        // v2/v3 made the default pill much smaller. Drop sizes saved by older builds once, so existing
+        // Each default-size change (v2-v4) clears saved sizes once. Drop sizes saved by older builds once, so existing
         // installs pick up the new size too; the sliders still work as before afterwards.
-        if (!sp.getBoolean("size_v3", false)) {
-            sp.edit().remove("width").remove("height").putBoolean("size_v3", true).apply()
+        if (!sp.getBoolean("size_v4", false)) {
+            sp.edit().remove("width").remove("height").putBoolean("size_v4", true).apply()
         }
     }
 
@@ -65,8 +65,8 @@ class Prefs(context: Context) {
     companion object {
         const val KEY_ENABLED = "enabled"
 
-        /** A small pill, a little bigger than the camera hole on most phones. */
-        const val DEFAULT_WIDTH = 76
-        const val DEFAULT_HEIGHT = 24
+        /** A short, chunky pill around the camera hole. */
+        const val DEFAULT_WIDTH = 68
+        const val DEFAULT_HEIGHT = 32
     }
 }

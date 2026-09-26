@@ -986,13 +986,13 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
     companion object {
         private const val SKIP_MS = 10_000L
         private const val ELLIPSIS = "\u2026"
-        private const val SIDE_DP = 46f
+        private const val SIDE_DP = 40f
         private const val ART_DP = 76f
 
         /** Half-width kept clear around the camera hole in compact states. */
         private const val CAMERA_CLEAR_DP = 16f
-        // Just long enough to ride out the brief pause some players report between tracks.
-        private const val PAUSE_LINGER_MS = 1_500L
+        /** How long the music island stays after you pause. */
+        private const val PAUSE_LINGER_MS = 5_000L
         private const val FADE_OUT_MS = 90f
         private const val FADE_IN_MS = 200f
         private const val FADE_IN_DELAY_MS = 40f

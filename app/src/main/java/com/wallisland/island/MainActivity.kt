@@ -322,9 +322,9 @@ class MainActivity : Activity() {
         }
         val d = resources.displayMetrics.density
         val hole = cam.height().coerceAtLeast(cam.width()) / d
-        val h = (hole + 14f).roundToInt().coerceIn(18, 48)
+        val h = (hole + 20f).roundToInt().coerceIn(18, 48)
         prefs.height = h
-        prefs.width = (h * 3f).roundToInt().coerceIn(40, 220)
+        prefs.width = (h * 2.1f).roundToInt().coerceIn(40, 220)
         prefs.offsetX = 0
         prefs.offsetY = 0
         prefs.autoAlign = true
