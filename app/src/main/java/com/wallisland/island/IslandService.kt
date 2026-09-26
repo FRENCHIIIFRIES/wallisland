@@ -51,6 +51,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
     private var island: IslandView? = null
     private var islandParams: WindowManager.LayoutParams? = null
     private var tracker: View? = null
+    private var trackerWm: WindowManager? = null
 
     private var fullscreen = false
     private var batteryLevel = -1
@@ -100,9 +101,9 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         }
         main.removeCallbacksAndMessages(null)
         island?.let { it.release(); removeView(it) }
-        tracker?.let { removeView(it) }
+        removeTracker()
         island = null
-        tracker = null
+        if (!status.startsWith("Couldn't")) status = "Not running"
         super.onDestroy()
     }
 
@@ -178,9 +179,8 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
     /** Moves the island between the app-overlay layer and the above-status-bar accessibility layer. */
     private fun reattach() {
         island?.let { it.release(); removeView(it) }
-        tracker?.let { removeView(it) }
+        removeTracker()
         island = null
-        tracker = null
         if (!canHost(this)) {
             stopSelf()
             return
@@ -192,9 +192,9 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         IslandHub.listener = this
     }
 
-    private fun overlayParams(w: Int, h: Int, flags: Int) = WindowManager.LayoutParams(
+    private fun overlayParams(w: Int, h: Int, flags: Int, type: Int = windowType) = WindowManager.LayoutParams(
         w, h,
-        windowType,
+        type,
         flags,
         PixelFormat.TRANSLUCENT,
     ).apply {
@@ -224,6 +224,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
             wm.addView(view, params)
         } catch (e: Exception) {
             island = null
+            status = "Couldn't create the island window: ${e.javaClass.simpleName}"
             stopSelf()
             return
         }
@@ -235,11 +236,25 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
      * out of the way of full-screen video and games.
      */
     private fun attachTracker() {
-        val v = View(windowCtx)
+        // The tracker must live in the normal app-overlay layer, below the status bar: a window above it
+        // (the accessibility layer) is told the status bar is hidden and would hide the island for good.
+        fullscreen = false
+        if (!Settings.canDrawOverlays(this)) return
+        val ctx: Context = if (Build.VERSION.SDK_INT >= 30) {
+            val display = getSystemService(DisplayManager::class.java).getDisplay(Display.DEFAULT_DISPLAY)
+            createDisplayContext(display)
+                .createWindowContext(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, null)
+        } else {
+            this
+        }
+        val twm = ctx.getSystemService(WindowManager::class.java)
+        val v = View(ctx)
         val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-        val params = overlayParams(1, WindowManager.LayoutParams.MATCH_PARENT, flags).apply {
+        val params = overlayParams(
+            1, WindowManager.LayoutParams.MATCH_PARENT, flags, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+        ).apply {
             gravity = Gravity.START or Gravity.TOP
             alpha = 0f
             title = "IslandTracker"
@@ -256,10 +271,21 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
             }
         }
         try {
-            wm.addView(v, params)
+            twm.addView(v, params)
             tracker = v
+            trackerWm = twm
         } catch (_: Exception) {
         }
+    }
+
+    private fun removeTracker() {
+        val v = tracker ?: return
+        try {
+            trackerWm?.removeViewImmediate(v)
+        } catch (_: Exception) {
+        }
+        tracker = null
+        trackerWm = null
     }
 
     private fun removeView(v: View) {
@@ -277,7 +303,21 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
 
     private fun updateHidden() {
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        island?.setHidden((prefs.hideFullscreen && fullscreen) || (prefs.hideLandscape && landscape))
+        val hideFs = prefs.hideFullscreen && fullscreen
+        val hideLand = prefs.hideLandscape && landscape
+        island?.setHidden(hideFs || hideLand)
+        val layer = if (windowType == WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY) {
+            "above the status bar"
+        } else {
+            "below the status bar"
+        }
+        status = when {
+            island == null -> "Couldn't create the island window"
+            !prefs.enabled -> "Off"
+            hideFs -> "Hidden: a full-screen app is open"
+            hideLand -> "Hidden: landscape"
+            else -> "Showing, $layer"
+        }
     }
 
     /** Centres the pill on the front camera, then applies the user's fine-tuning. */
@@ -493,6 +533,10 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
             private set
 
         private var current: IslandService? = null
+
+        /** A one-line description of what the island is doing, for the settings screen. */
+        @Volatile var status = "Not running"
+            private set
 
         /** The island can be drawn either as an app overlay or through the accessibility service. */
         fun canHost(ctx: Context) = Settings.canDrawOverlays(ctx) || IslandAccessibilityService.instance != null

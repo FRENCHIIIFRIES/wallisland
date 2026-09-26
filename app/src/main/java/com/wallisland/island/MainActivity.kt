@@ -28,6 +28,7 @@ class MainActivity : Activity() {
 
     private lateinit var prefs: Prefs
     private lateinit var statusText: TextView
+    private lateinit var statusDetail: TextView
     private lateinit var masterToggle: NToggle
     private var cameraText: TextView? = null
     private val permissionRows = mutableListOf<PermissionRow>()
@@ -113,6 +114,8 @@ class MainActivity : Activity() {
             setPadding(0, dp(4), 0, 0)
         }
         texts.addView(statusText)
+        statusDetail = subView("").apply { setPadding(0, dp(6), 0, 0) }
+        texts.addView(statusDetail)
         row.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         masterToggle = NToggle(this).apply {
             set(prefs.enabled)
@@ -255,6 +258,10 @@ class MainActivity : Activity() {
 
     // ---- State -------------------------------------------------------------------------------------------
 
+    private val refreshLater = Runnable {
+        if (prefs.enabled && IslandService.canHost(this)) statusDetail.text = IslandService.status
+    }
+
     private fun refresh() {
         val overlay = IslandService.canHost(this)
         statusText.text = when {
@@ -263,6 +270,14 @@ class MainActivity : Activity() {
             else -> "OFF"
         }
         statusText.setTextColor(if (!overlay) Look.RED else Look.WHITE)
+        statusDetail.text = when {
+            !overlay -> "Allow \"Show above status bar\" or \"Draw over apps\" below."
+            !prefs.enabled -> "Turn it on with the switch."
+            else -> IslandService.status
+        }
+        // The service reports back a moment after it starts; check again shortly.
+        statusDetail.removeCallbacks(refreshLater)
+        statusDetail.postDelayed(refreshLater, 800)
         masterToggle.set(prefs.enabled)
         for (row in permissionRows) {
             val ok = row.granted()
