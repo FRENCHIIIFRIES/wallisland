@@ -29,6 +29,7 @@ class MainActivity : Activity() {
     private lateinit var prefs: Prefs
     private lateinit var statusText: TextView
     private lateinit var statusDetail: TextView
+    private var unlockLogText: TextView? = null
     private lateinit var masterToggle: NToggle
     private var cameraText: TextView? = null
     private val permissionRows = mutableListOf<PermissionRow>()
@@ -230,6 +231,11 @@ class MainActivity : Activity() {
         card.addView(toggleRow("Live activities", "Timers, Maps directions and downloads", prefs.showLive) { prefs.showLive = it })
         card.addView(divider())
         card.addView(toggleRow("Unlock animation", "A dot padlock opens when you unlock", prefs.showUnlock) { prefs.showUnlock = it })
+        unlockLogText = subView(IslandHub.unlockLog).apply {
+            setPadding(dp(20), 0, dp(20), dp(14))
+            textSize = 10.5f
+        }
+        card.addView(unlockLogText)
         card.addView(divider())
         card.addView(toggleRow("Earbuds", "Battery when Bluetooth headphones connect", prefs.showBuds) { prefs.showBuds = it })
         card.addView(divider())
@@ -476,6 +482,7 @@ class MainActivity : Activity() {
             else -> IslandService.status
         }
         // The service reports back a moment after it starts; check again shortly.
+        unlockLogText?.text = IslandHub.unlockLog
         statusDetail.removeCallbacks(refreshLater)
         statusDetail.postDelayed(refreshLater, 800)
         masterToggle.set(prefs.enabled)

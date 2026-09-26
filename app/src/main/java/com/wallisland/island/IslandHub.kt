@@ -145,6 +145,9 @@ object IslandHub {
     var call: CallInfo? = null
         private set
 
+    /** What happened on the last unlock, shown in settings to help debug the unlock animation. */
+    @Volatile var unlockLog: String = "No unlock seen yet"
+
     fun postCall(info: CallInfo?) {
         call = info
         listener?.onCall(info)

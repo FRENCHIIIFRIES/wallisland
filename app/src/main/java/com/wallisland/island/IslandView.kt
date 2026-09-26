@@ -203,21 +203,47 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
      * Unlocking fires while the island may still be briefly hidden (lock screen, face unlock using the
      * camera). Remember the request and play the animation as soon as the island can show, within 2 s.
      */
-    fun showUnlock() {
-        if (!prefs.showUnlock) return
+    fun showUnlock(): Boolean {
+        if (!prefs.showUnlock) {
+            IslandHub.unlockLog += ": skipped, turned off"
+            return false
+        }
         unlockRequestedAt = SystemClock.uptimeMillis()
         handler.removeCallbacks(tryUnlock)
+        handler.removeCallbacks(unlockGaveUp)
         handler.postDelayed(tryUnlock, 120)
+        handler.postDelayed(unlockGaveUp, UNLOCK_WAIT_MS + 50)
+        return true
     }
 
     private var unlockRequestedAt = 0L
+    private var unlockBlocker = ""
 
-    private val tryUnlock = Runnable {
+    private val tryUnlock: Runnable = Runnable {
         val now = SystemClock.uptimeMillis()
-        if (unlockRequestedAt == 0L || now - unlockRequestedAt > 2000) return@Runnable
-        if (hidden || !screenOn || transient is Transient.NoticeT) return@Runnable
+        if (unlockRequestedAt == 0L || now - unlockRequestedAt > UNLOCK_WAIT_MS) return@Runnable
+        unlockBlocker = when {
+            hidden -> "island hidden (full screen, landscape or recording)"
+            !screenOn -> "screen off"
+            transient is Transient.NoticeT -> "a notification was showing"
+            else -> ""
+        }
+        if (unlockBlocker.isNotEmpty()) {
+            // Keep checking; the reason usually clears within a second of unlocking.
+            handler.postDelayed(tryUnlockAgain, 150)
+            return@Runnable
+        }
         unlockRequestedAt = 0L
+        handler.removeCallbacks(unlockGaveUp)
+        IslandHub.unlockLog += ": played"
         showTransient(Transient.UnlockT(now), 1500)
+    }
+    private val tryUnlockAgain: Runnable = Runnable { tryUnlock.run() }
+
+    private val unlockGaveUp = Runnable {
+        if (unlockRequestedAt == 0L) return@Runnable
+        unlockRequestedAt = 0L
+        IslandHub.unlockLog += ": skipped, $unlockBlocker"
     }
 
     fun showBuds(battery: Int) {
@@ -1302,6 +1328,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
 
     companion object {
         private const val SKIP_MS = 10_000L
+        private const val UNLOCK_WAIT_MS = 4_000L
         private const val ELLIPSIS = "\u2026"
         /**
          * How far compact states (music, call, charging, ringer) reach past the idle pill on each side.

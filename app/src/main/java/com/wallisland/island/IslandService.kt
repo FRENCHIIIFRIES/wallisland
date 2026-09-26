@@ -94,7 +94,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
             ACTION_DEMO_TIMER -> demoLive(LiveInfo.Kind.TIMER)
             ACTION_DEMO_NAV -> demoLive(LiveInfo.Kind.NAV)
             ACTION_DEMO_PROGRESS -> demoLive(LiveInfo.Kind.PROGRESS)
-            ACTION_DEMO_UNLOCK -> island?.showUnlock()
+            ACTION_DEMO_UNLOCK -> { IslandHub.unlockLog = "Demo"; island?.showUnlock() }
             ACTION_DEMO_BUDS -> island?.showBuds(78)
             ACTION_PREVIEW -> island?.preview()
         }
@@ -496,6 +496,45 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
 
     private fun toast(msg: String) = android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_SHORT).show()
 
+    // ---- Unlock ---------------------------------------------------------------------------------------------
+
+    private var wasLocked = false
+    private var lastUnlockAt = 0L
+    private var lockWatchStart = 0L
+
+    /**
+     * Backup for phones where the "user present" broadcast is late or missing: after the screen turns
+     * on, watch the lock state and treat locked -> unlocked as an unlock.
+     */
+    private val lockWatch: Runnable = object : Runnable {
+        override fun run() {
+            val locked = getSystemService(android.app.KeyguardManager::class.java)?.isKeyguardLocked == true
+            if (wasLocked && !locked) onUnlocked("lock-state watch")
+            wasLocked = locked
+            if (locked && SystemClock.uptimeMillis() - lockWatchStart < 60_000) main.postDelayed(this, 150)
+        }
+    }
+
+    private fun startLockWatch() {
+        main.removeCallbacks(lockWatch)
+        wasLocked = getSystemService(android.app.KeyguardManager::class.java)?.isKeyguardLocked == true
+        lockWatchStart = SystemClock.uptimeMillis()
+        if (wasLocked) main.postDelayed(lockWatch, 150)
+    }
+
+    private fun onUnlocked(source: String) {
+        val now = SystemClock.uptimeMillis()
+        if (now - lastUnlockAt < 2000) return // Both detectors fire; play it once.
+        lastUnlockAt = now
+        wasLocked = false
+        val time = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date())
+        IslandHub.unlockLog = "Last unlock $time (via $source)"
+        // Face unlock has let go of the camera now; re-check before deciding whether to hide.
+        recheckCapture()
+        val view = island
+        if (view == null) IslandHub.unlockLog += ": skipped, island window not created" else view.showUnlock()
+    }
+
     // ---- Earbuds ---------------------------------------------------------------------------------------------
 
     private var budsShownAt = 0L
@@ -653,8 +692,15 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
             when (intent.action) {
-                Intent.ACTION_SCREEN_ON -> island?.setScreenOn(true)
-                Intent.ACTION_SCREEN_OFF -> island?.setScreenOn(false)
+                Intent.ACTION_SCREEN_ON -> {
+                    island?.setScreenOn(true)
+                    startLockWatch()
+                }
+                Intent.ACTION_SCREEN_OFF -> {
+                    island?.setScreenOn(false)
+                    main.removeCallbacks(lockWatch)
+                    wasLocked = true
+                }
                 Intent.ACTION_POWER_CONNECTED -> {
                     charging = true
                     // Give the battery broadcast a beat to report the fresh level.
@@ -677,11 +723,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
                     if (isInitialStickyBroadcast) return
                     island?.showRinger(intent.getIntExtra(AudioManager.EXTRA_RINGER_MODE, AudioManager.RINGER_MODE_NORMAL))
                 }
-                Intent.ACTION_USER_PRESENT -> {
-                    // Unlocked: re-check the camera now that face unlock has let it go.
-                    recheckCapture()
-                    island?.showUnlock()
-                }
+                Intent.ACTION_USER_PRESENT -> onUnlocked("system signal")
                 android.bluetooth.BluetoothDevice.ACTION_ACL_CONNECTED, ACTION_BT_BATTERY -> onBluetooth(intent)
             }
         }
