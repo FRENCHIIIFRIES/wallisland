@@ -1,0 +1,105 @@
+name: Build Dotdeck
+
+on:
+  push:
+    paths: ["deck/**", ".github/workflows/deck.yml"]
+  pull_request:
+    paths: ["deck/**", ".github/workflows/deck.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    working-directory: deck
+    shell: bash
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: deck
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            file: Dotdeck-windows.exe
+          - os: macos-latest
+            file: Dotdeck-macos.zip
+            targets: aarch64-apple-darwin,x86_64-apple-darwin
+          # The oldest supported Ubuntu, so the binary runs on older glibc too.
+          - os: ubuntu-22.04
+            file: Dotdeck-linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.targets }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: deck
+
+      - name: Build for Windows
+        if: runner.os == 'Windows'
+        run: |
+          cargo build --release
+          cp target/release/dotdeck.exe ../${{ matrix.file }}
+
+      - name: Build for macOS
+        if: runner.os == 'macOS'
+        run: packaging/macos.sh ${{ github.run_number }} ../${{ matrix.file }}
+
+      - name: Build for Linux
+        if: runner.os == 'Linux'
+        run: |
+          cargo build --release
+          cp target/release/dotdeck ../${{ matrix.file }}
+          chmod +x ../${{ matrix.file }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.file }}
+          path: ${{ matrix.file }}
+          if-no-files-found: error
+
+  release:
+    needs: [check, build]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # Not marked latest: Wallisland's in-app updater reads the repo's latest release for its APK.
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: deck-${{ github.run_number }}
+          name: Dotdeck build ${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          make_latest: false
+          files: dist/*
+          body: |
+            Download the one for your computer and run it, then scan the QR code with your phone.
+
+            - **Windows:** Dotdeck-windows.exe
+            - **Mac:** Dotdeck-macos.zip (unzip, then right-click Dotdeck > Open the first time)
+            - **Linux:** Dotdeck-linux (`chmod +x Dotdeck-linux && ./Dotdeck-linux`)
+
+            Built from ${{ github.sha }}.

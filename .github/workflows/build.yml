@@ -1,8 +1,11 @@
 name: Build APK
 
 on:
+  # Dotdeck has its own workflow; changes that only touch it shouldn't publish a new APK.
   push:
+    paths-ignore: ["deck/**", ".github/workflows/deck.yml"]
   pull_request:
+    paths-ignore: ["deck/**", ".github/workflows/deck.yml"]
   workflow_dispatch:
 
 permissions:

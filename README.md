@@ -97,6 +97,15 @@ install over each other. If you're coming from build 12 or older, uninstall once
 
 Requires Android 8.0 (API 26) or newer.
 
+## Also here: Dotdeck
+
+[**Dotdeck**](deck/) turns your phone into a macro deck for your computer, like Touch Portal or Macro
+Deck, in the same dot style: hotkeys, media keys, apps, websites, commands, folders, and live clock /
+CPU / RAM tiles. Run it on the computer, scan the QR code, done. It has its own downloads under
+Releases (**Dotdeck build …**).
+
+<img src="deck/docs/deck.png" width="560" alt="Dotdeck on a phone">
+
 ## Fonts
 
 [Doto](https://fonts.google.com/specimen/Doto) (dot-matrix) and
