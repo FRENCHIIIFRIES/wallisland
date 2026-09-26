@@ -448,8 +448,8 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
     private val topZone get() = context.dp(prefs.height.toFloat())
 
     /** Left compact slot spans from the pill edge to just before the camera. */
-    private fun leftSlotStart() = pillRect.left + context.dp(14f)
-    private fun rightSlotEnd() = pillRect.right - context.dp(14f)
+    private fun leftSlotStart() = pillRect.left + context.dp(12f)
+    private fun rightSlotEnd() = pillRect.right - context.dp(12f)
 
     private fun drawMediaCompact(canvas: Canvas, alpha: Int) {
         val m = media ?: return
@@ -705,15 +705,15 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             glyphPaint.color = tint; glyphPaint.alpha = alpha
             val gs = compactSize(15f)
             Glyph.BOLT.draw(canvas, x, cy, gs, glyphPaint)
-            x += Glyph.BOLT.width(gs) + context.dp(6f)
+            x += Glyph.BOLT.width(gs) + context.dp(4f)
         }
         // Five-dot battery gauge.
         val filled = ((c.level + 10) / 20).coerceIn(if (c.level > 0) 1 else 0, 5)
-        val pitch = context.dp(6f)
+        val pitch = context.dp(5f)
         for (i in 0 until 5) {
             dotPaint.color = if (i < filled) tint else Look.DOT_OFF
             dotPaint.alpha = alpha
-            canvas.drawCircle(x + pitch * (i + 0.5f), cy, context.dp(2f), dotPaint)
+            canvas.drawCircle(x + pitch * (i + 0.5f), cy, context.dp(1.7f), dotPaint)
         }
         bigDotPaint.color = tint
         bigDotPaint.alpha = alpha
@@ -986,7 +986,11 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
     companion object {
         private const val SKIP_MS = 10_000L
         private const val ELLIPSIS = "\u2026"
-        private const val SIDE_DP = 40f
+        /**
+         * How far compact states (music, call, charging, ringer) reach past the idle pill on each side.
+         * Kept small so they fit in the gap between the status-bar icons.
+         */
+        private const val SIDE_DP = 20f
         private const val ART_DP = 76f
 
         /** Half-width kept clear around the camera hole in compact states. */
