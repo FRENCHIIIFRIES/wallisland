@@ -99,8 +99,9 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         }
     }
 
-    private val springW = Spring(0f, 340f, 0.74f, 0.5f)
-    private val springH = Spring(0f, 340f, 0.78f, 0.5f)
+    // Near-critically damped: a soft settle with the faintest overshoot, rather than a wobble.
+    private val springW = Spring(0f, 300f, 0.86f, 0.5f)
+    private val springH = Spring(0f, 300f, 0.9f, 0.5f)
     private val springAlpha = Spring(0f, 260f, 1f, 0.004f)
     private val springScale = Spring(1f, 600f, 0.7f, 0.001f)
 
@@ -156,7 +157,6 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         }
 
     init {
-        setLayerType(LAYER_TYPE_HARDWARE, null)
         applyPrefs()
         springW.snap(springW.target)
         springH.snap(springH.target)
@@ -190,8 +190,8 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             mediaExpanded = false
         } else if (old?.art !== info.art || !info.sameTrack(old)) {
             val art = info.art
-            mediaArt = art?.let { runCatching { DotArt(it, 18) }.getOrNull() }
-            mediaArtSmall = art?.let { runCatching { DotArt(it, 9) }.getOrNull() }
+            mediaArt = art?.let { runCatching { DotArt(it, 12) }.getOrNull() }
+            mediaArtSmall = art?.let { runCatching { DotArt(it, 7) }.getOrNull() }
             mediaPicture = art?.let { PictureArt(it, grayscale = false) }
         }
         if (info != null && !info.sameTrack(mediaDismissed)) mediaDismissed = null
@@ -343,7 +343,10 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             if (needsTicker()) {
                 frameScheduled = true
                 // Idle ambient motion (visualizer, playhead) doesn't need 120 fps.
-                handler.postDelayed({ frameScheduled = false; lastFrame = 0L; invalidate(); kick() }, 50)
+                // Ambient motion (equaliser, playhead): full frame rate when the player is open, 30 fps
+                // in the small pill to save battery.
+                val delay = if (shownMode == Mode.MEDIA_EXPANDED) 16L else 33L
+                handler.postDelayed({ frameScheduled = false; lastFrame = 0L; invalidate(); kick() }, delay)
             }
         }
     }
@@ -527,20 +530,27 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         val left = right - pitch * cols
         val top = cy - pitch * rows / 2f
         for (c in 0 until cols) {
+            // A continuous level, so the top dot of each column fades in and out instead of popping.
             val level = if (playing) {
                 val v = 0.5f + 0.3f * sin(t * (5.1f + c * 1.7f) + c * 1.3f) + 0.2f * sin(t * (8.3f - c) + c * 2.1f)
-                1 + (v.coerceIn(0f, 1f) * (rows - 1)).roundToInt()
-            } else 1
+                1f + v.coerceIn(0f, 1f) * (rows - 1)
+            } else 1f
             for (row in 0 until rows) {
-                val lit = rows - row <= level
+                val x = left + pitch * (c + 0.5f)
+                val y = top + pitch * (row + 0.5f)
+                val fromBottom = rows - row // 1 = bottom dot
+                val fill = (level - (fromBottom - 1)).coerceIn(0f, 1f)
+                dotPaint.color = Look.DOT_OFF
+                dotPaint.alpha = alpha
+                if (fill < 1f) canvas.drawCircle(x, y, r, dotPaint)
+                if (fill <= 0f) continue
                 dotPaint.color = when {
-                    !lit -> Look.DOT_OFF
                     !playing -> Look.GREY
-                    row == rows - level && level == rows -> eqPeak()
+                    fromBottom == rows -> eqPeak()
                     else -> eqColor()
                 }
-                dotPaint.alpha = alpha
-                canvas.drawCircle(left + pitch * (c + 0.5f), top + pitch * (row + 0.5f), r, dotPaint)
+                dotPaint.alpha = (alpha * fill).roundToInt()
+                canvas.drawCircle(x, y, r, dotPaint)
             }
         }
     }
@@ -645,22 +655,18 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         val count = max(2, ((barR - barL) / pitch).toInt())
         val step = (barR - barL) / (count - 1)
         val frac = if (dur > 0) (pos.toFloat() / dur).coerceIn(0f, 1f) else 0f
-        val head = (frac * (count - 1)).roundToInt()
+        // The playhead glides continuously; the dots it has passed light up behind it.
+        val headX = barL + (barR - barL) * frac
         for (i in 0 until count) {
             val x = barL + i * step
-            val isHead = dur > 0 && i == head
-            dotPaint.color = when {
-                isHead -> Look.RED
-                dur > 0 && i < head -> eqColor()
-                else -> Look.DOT_OFF
-            }
+            dotPaint.color = if (dur > 0 && x < headX) eqColor() else Look.DOT_OFF
             dotPaint.alpha = alpha
-            val r = when {
-                isHead && scrubbing -> 4.6f
-                isHead -> 3.2f
-                else -> 1.5f
-            }
-            canvas.drawCircle(x, barY, context.dp(r), dotPaint)
+            canvas.drawCircle(x, barY, context.dp(1.5f), dotPaint)
+        }
+        if (dur > 0) {
+            dotPaint.color = Look.RED
+            dotPaint.alpha = alpha
+            canvas.drawCircle(headX, barY, context.dp(if (scrubbing) 4.6f else 3.2f), dotPaint)
         }
         // Generous touch target so the bar is easy to grab.
         hitBar.set(barL - context.dp(8f), barY - context.dp(16f), barR + context.dp(8f), barY + context.dp(16f))

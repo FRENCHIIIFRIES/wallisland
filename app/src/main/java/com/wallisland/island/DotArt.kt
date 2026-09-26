@@ -65,11 +65,12 @@ class DotArt(source: Bitmap, private val grid: Int) {
             if (v < 0.08f) {
                 paint.color = Look.DOT_OFF
                 paint.alpha = alpha
-                canvas.drawCircle(x, y, maxR * 0.28f, paint)
+                canvas.drawCircle(x, y, maxR * 0.3f, paint)
             } else {
                 paint.color = if (colored) colors[row * grid + col] else Look.WHITE
                 paint.alpha = alpha
-                canvas.drawCircle(x, y, maxR * (0.3f + 0.62f * v), paint)
+                // Fat dots (fewer of them) so the picture reads at a glance.
+                canvas.drawCircle(x, y, maxR * (0.5f + 0.42f * v), paint)
             }
         }
         paint.color = saved
