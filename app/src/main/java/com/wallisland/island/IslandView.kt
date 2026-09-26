@@ -122,7 +122,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         fontVariationSettings = "'wght' 800, 'ROND' 100"
         letterSpacing = 0.08f
     }
-    private val bigDotPaint = textPaint(Look.dot(context), 17f, Look.WHITE).apply {
+    private val bigDotPaint = textPaint(Look.dot(context), 15f, Look.WHITE).apply {
         fontVariationSettings = "'wght' 900, 'ROND' 100"
     }
     private val titlePaint = textPaint(Look.monoBold(context), 14f, Look.WHITE)
@@ -279,11 +279,11 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
 
         val idleW = context.dp(prefs.width.toFloat())
         val idleH = context.dp(prefs.height.toFloat())
-        val bigW = min(resources.displayMetrics.widthPixels - context.dp(20f), context.dp(400f))
+        val bigW = min(resources.displayMetrics.widthPixels - context.dp(24f), context.dp(360f))
         val (w, h) = when (mode) {
             Mode.IDLE -> idleW to idleH
             Mode.MEDIA, Mode.CHARGING, Mode.RINGER -> idleW + 2 * context.dp(SIDE_DP) to idleH
-            Mode.NOTICE -> bigW to idleH + context.dp(66f)
+            Mode.NOTICE -> bigW to idleH + context.dp(60f)
             Mode.MEDIA_EXPANDED -> bigW to idleH + context.dp(172f)
         }
         val previewing = SystemClock.uptimeMillis() < previewUntil
@@ -440,10 +440,10 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
     private fun drawMediaCompact(canvas: Canvas, alpha: Int) {
         val m = media ?: return
         val cy = pillRect.top + topZone / 2f
-        val s = context.dp(20f)
+        val s = context.dp(18f)
         box.set(leftSlotStart(), cy - s / 2f, leftSlotStart() + s, cy + s / 2f)
         drawArt(canvas, box, small = true, alpha = alpha)
-        drawVisualizer(canvas, rightSlotEnd(), cy, context.dp(4.2f), 4, 4, m.playing, alpha)
+        drawVisualizer(canvas, rightSlotEnd(), cy, context.dp(3.8f), 4, 4, m.playing, alpha)
     }
 
     private fun drawArt(canvas: Canvas, b: RectF, small: Boolean, alpha: Int) {
@@ -517,8 +517,8 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
 
     private fun drawNotice(canvas: Canvas, n: Notice, alpha: Int) {
         drawHeader(canvas, n.appName, "NOW", alpha)
-        val cy = pillRect.top + topZone + context.dp(28f)
-        val s = context.dp(40f)
+        val cy = pillRect.top + topZone + context.dp(26f)
+        val s = context.dp(38f)
         box.set(pillRect.left + context.dp(16f), cy - s / 2f, pillRect.left + context.dp(16f) + s, cy + s / 2f)
         val avatar = noticeAvatar
         if (avatar != null) {
@@ -704,7 +704,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         }
         bigDotPaint.color = if (mode == AudioManager.RINGER_MODE_SILENT) Look.RED else Look.WHITE
         bigDotPaint.alpha = alpha
-        val slot = rightSlotEnd() - (pillRect.centerX() + idleHalf + context.dp(6f))
+        val slot = rightSlotEnd() - (pillRect.centerX() + context.dp(CAMERA_CLEAR_DP))
         val size = bigDotPaint.textSize
         bigDotPaint.textSize = min(size, size * slot / max(1f, bigDotPaint.measureText(label)))
         val tw = bigDotPaint.measureText(label)
@@ -936,8 +936,11 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
     companion object {
         private const val SKIP_MS = 10_000L
         private const val ELLIPSIS = "\u2026"
-        private const val SIDE_DP = 62f
+        private const val SIDE_DP = 46f
         private const val ART_DP = 76f
+
+        /** Half-width kept clear around the camera hole in compact states. */
+        private const val CAMERA_CLEAR_DP = 16f
         private const val PAUSE_LINGER_MS = 60_000L
         private const val FADE_OUT_MS = 90f
         private const val FADE_IN_MS = 200f

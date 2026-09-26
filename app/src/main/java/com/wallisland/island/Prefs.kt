@@ -7,6 +7,14 @@ import android.content.SharedPreferences
 class Prefs(context: Context) {
     val sp: SharedPreferences = context.applicationContext.getSharedPreferences("island", Context.MODE_PRIVATE)
 
+    init {
+        // v2 made the default pill much smaller. Drop sizes saved by older builds once, so existing
+        // installs pick up the new size too; the sliders still work as before afterwards.
+        if (!sp.getBoolean("size_v2", false)) {
+            sp.edit().remove("width").remove("height").putBoolean("size_v2", true).apply()
+        }
+    }
+
     var enabled by bool(KEY_ENABLED, true)
 
     var showMedia by bool("show_media", true)
@@ -22,8 +30,8 @@ class Prefs(context: Context) {
     var autoAlign by bool("auto_align", true)
 
     /** Idle pill size in dp. */
-    var width by int("width", 100)
-    var height by int("height", 32)
+    var width by int("width", DEFAULT_WIDTH)
+    var height by int("height", DEFAULT_HEIGHT)
 
     /** Fine-tuning on top of the auto camera alignment, in dp. */
     var offsetX by int("offset_x", 0)
@@ -56,5 +64,9 @@ class Prefs(context: Context) {
 
     companion object {
         const val KEY_ENABLED = "enabled"
+
+        /** A small pill, a little bigger than the camera hole on most phones. */
+        const val DEFAULT_WIDTH = 84
+        const val DEFAULT_HEIGHT = 28
     }
 }

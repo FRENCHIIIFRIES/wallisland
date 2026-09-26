@@ -218,13 +218,13 @@ class MainActivity : Activity() {
         camRow.addView(pillButton(this, "Fit to camera") { fitToCamera() })
         card.addView(camRow)
         card.addView(divider())
-        card.addView(sliderRow("Width", 60, 220, prefs.width, "dp") { prefs.width = it })
-        card.addView(sliderRow("Height", 22, 48, prefs.height, "dp") { prefs.height = it })
+        card.addView(sliderRow("Width", 40, 220, prefs.width, "dp") { prefs.width = it })
+        card.addView(sliderRow("Height", 18, 48, prefs.height, "dp") { prefs.height = it })
         card.addView(sliderRow("Move left / right", -60, 60, prefs.offsetX, "dp") { prefs.offsetX = it })
         card.addView(sliderRow("Move up / down", -30, 40, prefs.offsetY, "dp") { prefs.offsetY = it })
         card.addView(sliderRow("Notification time", 2, 10, prefs.noticeSeconds, "s", live = false) { prefs.noticeSeconds = it })
         val reset = pillButton(this, "Reset size") {
-            prefs.width = 100; prefs.height = 32; prefs.offsetX = 0; prefs.offsetY = 0; prefs.noticeSeconds = 4
+            prefs.width = Prefs.DEFAULT_WIDTH; prefs.height = Prefs.DEFAULT_HEIGHT; prefs.offsetX = 0; prefs.offsetY = 0; prefs.noticeSeconds = 4
             recreate()
         }
         card.addView(FrameLayout(this).apply {
@@ -299,9 +299,9 @@ class MainActivity : Activity() {
         }
         val d = resources.displayMetrics.density
         val hole = cam.height().coerceAtLeast(cam.width()) / d
-        val h = (hole + 18f).roundToInt().coerceIn(22, 48)
+        val h = (hole + 14f).roundToInt().coerceIn(18, 48)
         prefs.height = h
-        prefs.width = (h * 3.3f).roundToInt().coerceIn(60, 220)
+        prefs.width = (h * 3f).roundToInt().coerceIn(40, 220)
         prefs.offsetX = 0
         prefs.offsetY = 0
         prefs.autoAlign = true
