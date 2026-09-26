@@ -40,8 +40,12 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
     private lateinit var prefs: Prefs
     private lateinit var wm: WindowManager
 
-    /** A window context, so window metrics and cut-out insets describe the real display. */
+    /**
+     * Where the island's windows live. Normally a window context for app overlays; when the accessibility
+     * service is on, the service itself, whose overlays sit above the status bar.
+     */
     private lateinit var windowCtx: Context
+    private var windowType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
     private val main = Handler(Looper.getMainLooper())
 
     private var island: IslandView? = null
@@ -59,20 +63,14 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
     override fun onCreate() {
         super.onCreate()
         prefs = Prefs(this)
-        windowCtx = if (Build.VERSION.SDK_INT >= 30) {
-            val display = getSystemService(DisplayManager::class.java).getDisplay(Display.DEFAULT_DISPLAY)
-            createDisplayContext(display)
-                .createWindowContext(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, null)
-        } else {
-            this
-        }
-        wm = windowCtx.getSystemService(WindowManager::class.java)
+        chooseHost()
         goForeground()
-        if (!Settings.canDrawOverlays(this) || !prefs.enabled) {
+        if (!canHost(this) || !prefs.enabled) {
             stopSelf()
             return
         }
         running = true
+        current = this
         attachIsland()
         attachTracker()
         registerReceivers()
@@ -93,6 +91,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
 
     override fun onDestroy() {
         running = false
+        if (current === this) current = null
         if (IslandHub.listener === this) IslandHub.listener = null
         if (::prefs.isInitialized) prefs.sp.unregisterOnSharedPreferenceChangeListener(this)
         if (receiversOn) {
@@ -158,9 +157,44 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
 
     // ---- Windows -----------------------------------------------------------------------------------------
 
+    private fun chooseHost() {
+        val a11y = IslandAccessibilityService.instance
+        if (a11y != null) {
+            windowCtx = a11y
+            windowType = WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+        } else {
+            windowCtx = if (Build.VERSION.SDK_INT >= 30) {
+                val display = getSystemService(DisplayManager::class.java).getDisplay(Display.DEFAULT_DISPLAY)
+                createDisplayContext(display)
+                    .createWindowContext(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, null)
+            } else {
+                this
+            }
+            windowType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        }
+        wm = windowCtx.getSystemService(WindowManager::class.java)
+    }
+
+    /** Moves the island between the app-overlay layer and the above-status-bar accessibility layer. */
+    private fun reattach() {
+        island?.let { it.release(); removeView(it) }
+        tracker?.let { removeView(it) }
+        island = null
+        tracker = null
+        if (!canHost(this)) {
+            stopSelf()
+            return
+        }
+        chooseHost()
+        attachIsland()
+        attachTracker()
+        // Re-feed the new view with what's going on right now.
+        IslandHub.listener = this
+    }
+
     private fun overlayParams(w: Int, h: Int, flags: Int) = WindowManager.LayoutParams(
         w, h,
-        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+        windowType,
         flags,
         PixelFormat.TRANSLUCENT,
     ).apply {
@@ -458,8 +492,19 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         @Volatile var running = false
             private set
 
+        private var current: IslandService? = null
+
+        /** The island can be drawn either as an app overlay or through the accessibility service. */
+        fun canHost(ctx: Context) = Settings.canDrawOverlays(ctx) || IslandAccessibilityService.instance != null
+
+        /** Called when the accessibility service connects or goes away. */
+        fun onHostChanged(ctx: Context) {
+            val svc = current
+            if (svc != null) svc.reattach() else start(ctx)
+        }
+
         fun start(ctx: Context, action: String? = null) {
-            if (!Prefs(ctx).enabled || !Settings.canDrawOverlays(ctx)) return
+            if (!Prefs(ctx).enabled || !canHost(ctx)) return
             val i = Intent(ctx, IslandService::class.java).setAction(action)
             try {
                 ctx.startForegroundService(i)

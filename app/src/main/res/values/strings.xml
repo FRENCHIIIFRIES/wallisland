@@ -2,4 +2,6 @@
 <resources>
     <string name="app_name">Wallisland</string>
     <string name="tile_label">Island</string>
+    <string name="a11y_label">Wallisland: show above status bar</string>
+    <string name="a11y_description">Lets Wallisland draw the island on top of the status bar, like a real dynamic island. It does not read your screen or anything you type.</string>
 </resources>

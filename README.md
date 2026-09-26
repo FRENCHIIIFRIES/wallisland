@@ -58,11 +58,15 @@ On your phone, download
 
 Then open the app and allow the permissions it asks for:
 
-1. **Draw over apps** (required).
-2. **Notification access**, for notifications and now playing. On Android 13+ this may be greyed out
-   for sideloaded apps. To enable it, go to *Settings → Apps → Wallisland → ⋮ → Allow restricted
+1. **Show above status bar** (recommended). Tap Allow, then turn on *Wallisland* in Accessibility.
+   Accessibility overlays are the only windows Android lets an app place above the status bar
+   icons. The service reads nothing on screen. Without it, the island still works
+   but the status-bar icons sit on top of it.
+2. **Draw over apps**, needed if you don't use the option above.
+3. **Notification access**, for notifications and now playing. On Android 13+ this (and the Accessibility
+   switch) may be greyed out for sideloaded apps. To enable it, go to *Settings → Apps → Wallisland → ⋮ → Allow restricted
    settings*, then try again.
-3. **Unrestricted battery**, so the system doesn't kill the island.
+4. **Unrestricted battery**, so the system doesn't kill the island.
 
 Use the **Try it** buttons in the app to preview each state.
 

@@ -131,11 +131,18 @@ class MainActivity : Activity() {
         col.addView(sectionLabel("SETUP"))
         val card = card()
         card.addView(permissionRow(
-            "Draw over apps", "Required. Lets the island sit on top of everything.",
+            "Draw over apps", "Needed unless \"Show above status bar\" is on. Lets the island float over apps.",
             granted = { Settings.canDrawOverlays(this) },
         ) {
             startSafely(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
         })
+        card.addView(divider())
+        card.addView(permissionRow(
+            "Show above status bar",
+            "Recommended. Accessibility → Wallisland. Puts the island over the status bar icons. " +
+                "It doesn't read your screen.",
+            granted = { IslandAccessibilityService.isEnabled(this) },
+        ) { startSafely(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) })
         card.addView(divider())
         card.addView(permissionRow(
             "Notification access",
@@ -161,7 +168,7 @@ class MainActivity : Activity() {
         col.addView(sectionLabel("TRY IT"))
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         fun demo(label: String, action: String) = pillButton(this, label) {
-            if (!Settings.canDrawOverlays(this)) {
+            if (!IslandService.canHost(this)) {
                 toast("Allow \"Draw over apps\" first")
             } else {
                 IslandService.start(this, action)
@@ -249,7 +256,7 @@ class MainActivity : Activity() {
     // ---- State -------------------------------------------------------------------------------------------
 
     private fun refresh() {
-        val overlay = Settings.canDrawOverlays(this)
+        val overlay = IslandService.canHost(this)
         statusText.text = when {
             !overlay -> "SETUP"
             prefs.enabled -> "ON"
