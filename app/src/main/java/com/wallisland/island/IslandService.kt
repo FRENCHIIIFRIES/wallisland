@@ -617,8 +617,14 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
                 it.clientAudioSource == MediaRecorder.AudioSource.CAMCORDER ||
                 it.clientAudioSource == MediaRecorder.AudioSource.UNPROCESSED
         }
-        // The torch holds the back camera too; that isn't "recording".
-        val cams = if (torchOn) camerasInUse - setOfNotNull(torchId) else camerasInUse
+        // The torch holds the back camera too; that isn't "recording". Nor is face unlock, which uses
+        // the front camera while the phone is still locked.
+        val locked = getSystemService(android.app.KeyguardManager::class.java)?.isKeyguardLocked == true
+        val cams = when {
+            locked -> emptySet()
+            torchOn -> camerasInUse - setOfNotNull(torchId)
+            else -> camerasInUse
+        }
         val now = cams.isNotEmpty() || recorder
         main.removeCallbacks(applyCapture)
         if (now) {
@@ -671,7 +677,11 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
                     if (isInitialStickyBroadcast) return
                     island?.showRinger(intent.getIntExtra(AudioManager.EXTRA_RINGER_MODE, AudioManager.RINGER_MODE_NORMAL))
                 }
-                Intent.ACTION_USER_PRESENT -> island?.showUnlock()
+                Intent.ACTION_USER_PRESENT -> {
+                    // Unlocked: re-check the camera now that face unlock has let it go.
+                    recheckCapture()
+                    island?.showUnlock()
+                }
                 android.bluetooth.BluetoothDevice.ACTION_ACL_CONNECTED, ACTION_BT_BATTERY -> onBluetooth(intent)
             }
         }

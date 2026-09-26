@@ -199,10 +199,25 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         invalidate()
     }
 
+    /**
+     * Unlocking fires while the island may still be briefly hidden (lock screen, face unlock using the
+     * camera). Remember the request and play the animation as soon as the island can show, within 2 s.
+     */
     fun showUnlock() {
-        if (!prefs.showUnlock || hidden) return
-        if (transient is Transient.NoticeT) return
-        showTransient(Transient.UnlockT(SystemClock.uptimeMillis()), 1500)
+        if (!prefs.showUnlock) return
+        unlockRequestedAt = SystemClock.uptimeMillis()
+        handler.removeCallbacks(tryUnlock)
+        handler.postDelayed(tryUnlock, 120)
+    }
+
+    private var unlockRequestedAt = 0L
+
+    private val tryUnlock = Runnable {
+        val now = SystemClock.uptimeMillis()
+        if (unlockRequestedAt == 0L || now - unlockRequestedAt > 2000) return@Runnable
+        if (hidden || !screenOn || transient is Transient.NoticeT) return@Runnable
+        unlockRequestedAt = 0L
+        showTransient(Transient.UnlockT(now), 1500)
     }
 
     fun showBuds(battery: Int) {
@@ -278,6 +293,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             transient = null
         }
         resolve()
+        if (!hide) handler.post(tryUnlock)
     }
 
     fun setScreenOn(on: Boolean) {
@@ -288,6 +304,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             transient = null
         }
         resolve()
+        if (on) handler.post(tryUnlock)
     }
 
     fun release() {
