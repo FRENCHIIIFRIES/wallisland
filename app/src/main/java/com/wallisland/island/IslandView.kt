@@ -52,7 +52,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         data class ChargeT(val level: Int, val charging: Boolean) : Transient()
         data class RingerT(val mode: Int) : Transient()
         data class UnlockT(val startedAt: Long) : Transient()
-        data class BudsT(val battery: Int) : Transient()
+        data class BudsT(val battery: Int, val name: String?) : Transient()
     }
 
     // ---- State -----------------------------------------------------------------------------------------
@@ -246,10 +246,12 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         IslandHub.unlockLog += ": skipped, $unlockBlocker"
     }
 
-    fun showBuds(battery: Int) {
+    /** [name] null keeps the name from the pop-up already showing (a later battery update). */
+    fun showBuds(battery: Int, name: String?) {
         if (!prefs.showBuds || hidden || !screenOn) return
         if (transient is Transient.NoticeT) return
-        showTransient(Transient.BudsT(battery), 3500)
+        val keepName = name ?: (transient as? Transient.BudsT)?.name
+        showTransient(Transient.BudsT(battery, keepName), 3500)
     }
 
     /** Refresh the quick-toggle panel after its state changed (torch, ringer, rotation). */
@@ -577,7 +579,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             Mode.RINGER -> (shownTransient as? Transient.RingerT)?.let { drawRinger(canvas, it.mode, alpha) }
             Mode.LIVE -> currentLive()?.let { drawLive(canvas, it, alpha) }
             Mode.UNLOCK -> (shownTransient as? Transient.UnlockT)?.let { drawUnlock(canvas, it, alpha) }
-            Mode.BUDS -> (shownTransient as? Transient.BudsT)?.let { drawBuds(canvas, it.battery, alpha) }
+            Mode.BUDS -> (shownTransient as? Transient.BudsT)?.let { drawBuds(canvas, it.battery, it.name, alpha) }
             Mode.TOGGLES -> drawToggles(canvas, alpha)
         }
         canvas.restore()
@@ -910,7 +912,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             LiveInfo.Kind.TIMER -> {
                 glyphPaint.color = Look.accent; glyphPaint.alpha = alpha
                 Glyph.TIMER.draw(canvas, x, cy, gs, glyphPaint)
-                drawRightText(canvas, l.timeText() ?: "--:--", Look.WHITE, alpha)
+                drawRightText(canvas, l.timeText() ?: l.title.ifEmpty { "ON" }, Look.WHITE, alpha)
             }
             LiveInfo.Kind.PROGRESS -> {
                 // A ring of twelve dots that fills up; spins while the size is unknown.
@@ -952,12 +954,13 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
     }
 
     /** Earbuds connected: headphones on the left, their battery on the right. */
-    private fun drawBuds(canvas: Canvas, battery: Int, alpha: Int) {
+    private fun drawBuds(canvas: Canvas, battery: Int, name: String?, alpha: Int) {
         val cy = pillRect.top + topZone / 2f
         glyphPaint.color = Look.WHITE
         glyphPaint.alpha = alpha
         Glyph.HEADPHONES.draw(canvas, leftSlotStart(), cy, compactSize(15f), glyphPaint)
-        val text = if (battery in 0..100) "$battery%" else "ON"
+        // Battery when we know it, else the headphones' name (shrunk to fit), else just ON.
+        val text = if (battery in 0..100) "$battery%" else name?.takeIf { it.isNotBlank() }?.uppercase() ?: "ON"
         drawRightText(canvas, text, if (battery in 0..20) Look.accent else Look.WHITE, alpha)
     }
 

@@ -81,6 +81,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         attachTracker()
         registerReceivers()
         registerCaptureWatchers()
+        registerAudioDevices()
         prefs.sp.registerOnSharedPreferenceChangeListener(this)
         IslandHub.listener = this
     }
@@ -95,7 +96,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
             ACTION_DEMO_NAV -> demoLive(LiveInfo.Kind.NAV)
             ACTION_DEMO_PROGRESS -> demoLive(LiveInfo.Kind.PROGRESS)
             ACTION_DEMO_UNLOCK -> { IslandHub.unlockLog = "Demo"; island?.showUnlock() }
-            ACTION_DEMO_BUDS -> island?.showBuds(78)
+            ACTION_DEMO_BUDS -> island?.showBuds(78, "Nothing Ear")
             ACTION_PREVIEW -> island?.preview()
         }
         return START_STICKY
@@ -110,6 +111,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
             unregisterReceiver(receiver)
             receiversOn = false
             unregisterCaptureWatchers()
+            getSystemService(AudioManager::class.java)?.unregisterAudioDeviceCallback(audioDevices)
         }
         main.removeCallbacksAndMessages(null)
         island?.let { it.release(); removeView(it) }
@@ -555,14 +557,56 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         if (!audio) return
         when (intent.action) {
             android.bluetooth.BluetoothDevice.ACTION_ACL_CONNECTED -> {
-                budsShownAt = SystemClock.uptimeMillis()
-                island?.showBuds(budsBattery(device))
+                // The audio-device callback shows the pop-up; if it already did, add the battery.
+                val level = budsBattery(device)
+                if (level >= 0 && SystemClock.uptimeMillis() - budsShownAt < 6000) island?.showBuds(level, null)
             }
             ACTION_BT_BATTERY -> {
                 // Earbuds report battery a moment after connecting; update the pop-up if it's still fresh.
                 val level = intent.getIntExtra(EXTRA_BT_BATTERY, -1)
-                if (level >= 0 && SystemClock.uptimeMillis() - budsShownAt < 6000) island?.showBuds(level)
+                if (level >= 0 && SystemClock.uptimeMillis() - budsShownAt < 6000) island?.showBuds(level, null)
             }
+        }
+    }
+
+    /**
+     * Headphones via the audio system: works without any Bluetooth permission. Battery still needs
+     * "Nearby devices"; without it the pop-up shows the headphones' name instead.
+     */
+    private var audioReady = false
+
+    private val audioDevices = object : android.media.AudioDeviceCallback() {
+        override fun onAudioDevicesAdded(added: Array<out android.media.AudioDeviceInfo>) {
+            // The first callback lists devices already connected when we registered; skip those.
+            if (!audioReady) return
+            val d = added.firstOrNull { it.isSink && it.type in BT_AUDIO_TYPES } ?: return
+            val name = d.productName?.toString()?.trim().orEmpty()
+            val battery = budsBatteryFor(d.address)
+            IslandHub.budsLog = "Last: ${name.ifEmpty { "Bluetooth audio" }}, battery " +
+                (if (battery >= 0) "$battery%" else "unknown" + if (!hasBtPermission()) " (Nearby devices not allowed)" else "")
+            budsShownAt = SystemClock.uptimeMillis()
+            island?.showBuds(battery, name)
+        }
+    }
+
+    private fun registerAudioDevices() {
+        val am = getSystemService(AudioManager::class.java) ?: return
+        audioReady = false
+        am.registerAudioDeviceCallback(audioDevices, main)
+        main.postDelayed({ audioReady = true }, 1500)
+    }
+
+    private fun hasBtPermission() = Build.VERSION.SDK_INT < 31 ||
+        checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+    @SuppressLint("MissingPermission")
+    private fun budsBatteryFor(address: String?): Int {
+        if (address.isNullOrEmpty() || !hasBtPermission()) return -1
+        return try {
+            val adapter = getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter ?: return -1
+            budsBattery(adapter.getRemoteDevice(address))
+        } catch (_: Exception) {
+            -1
         }
     }
 
@@ -846,6 +890,15 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         const val ACTION_DEMO_BUDS = "com.wallisland.island.DEMO_BUDS"
 
         /** Hidden-API broadcast the Bluetooth stack sends when a device reports its battery. */
+        private val BT_AUDIO_TYPES = buildSet {
+            add(android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP)
+            add(android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
+            if (Build.VERSION.SDK_INT >= 31) {
+                add(android.media.AudioDeviceInfo.TYPE_BLE_HEADSET)
+                add(android.media.AudioDeviceInfo.TYPE_BLE_SPEAKER)
+            }
+        }
+
         private const val ACTION_BT_BATTERY = "android.bluetooth.device.action.BATTERY_LEVEL_CHANGED"
         private const val EXTRA_BT_BATTERY = "android.bluetooth.device.extra.BATTERY_LEVEL"
         const val ACTION_PREVIEW = "com.wallisland.island.PREVIEW"

@@ -65,6 +65,7 @@ class MainActivity : Activity() {
         buildShow(col)
         buildBehaviour(col)
         buildSize(col)
+        buildTroubleshoot(col)
         buildUpdates(col)
         buildFooter(col)
     }
@@ -355,6 +356,47 @@ class MainActivity : Activity() {
             addView(reset, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         })
         col.addView(card)
+    }
+
+    /** Shows exactly what the island sees, so a screenshot is enough to fix detection problems. */
+    private fun buildTroubleshoot(col: LinearLayout) {
+        col.addView(sectionLabel("TROUBLESHOOT"))
+        val card = card()
+        val report = TextView(this).apply {
+            typeface = Look.mono(context)
+            textSize = 10.5f
+            setTextColor(Look.GREY)
+            setTextIsSelectable(true)
+            setPadding(dp(20), 0, dp(20), dp(16))
+            visibility = View.GONE
+        }
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(20), dp(16), dp(16), dp(16))
+        }
+        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, dp(12), 0) }
+        texts.addView(titleView("What the island sees"))
+        texts.addView(subView("Start a timer or Maps directions, then tap Check and screenshot the result."))
+        row.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(pillButton(this, "Check") {
+            report.text = troubleshootReport()
+            report.visibility = View.VISIBLE
+        })
+        card.addView(row)
+        card.addView(report)
+        col.addView(card)
+    }
+
+    private fun troubleshootReport(): String = buildString {
+        append("ISLAND\n").append(if (prefs.enabled) IslandService.status else "Off").append("\n\n")
+        append("LIVE ACTIVITIES (timers, Maps, downloads)\n")
+        val listener = IslandNotificationListener.instance
+        append(listener?.describeOngoing() ?: "Notification access is off, or the listener isn't connected yet.")
+        append("\n\nUNLOCK\n").append(IslandHub.unlockLog)
+        append("\n\nHEADPHONES\n").append(IslandHub.budsLog)
+        append("\n\nAndroid ").append(Build.VERSION.RELEASE).append(" · ").append(Build.MANUFACTURER)
+            .append(' ').append(Build.MODEL).append(" · build ").append(Updater.currentBuild(this@MainActivity))
     }
 
     private lateinit var updateText: TextView

@@ -148,6 +148,9 @@ object IslandHub {
     /** What happened on the last unlock, shown in settings to help debug the unlock animation. */
     @Volatile var unlockLog: String = "No unlock seen yet"
 
+    /** What happened when headphones last connected, for Troubleshoot. */
+    @Volatile var budsLog: String = "No headphones connected since the island started"
+
     fun postCall(info: CallInfo?) {
         call = info
         listener?.onCall(info)
