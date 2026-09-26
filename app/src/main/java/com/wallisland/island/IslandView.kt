@@ -37,7 +37,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         fun openSettings()
     }
 
-    private enum class Mode { IDLE, MEDIA, MEDIA_EXPANDED, NOTICE, CHARGING, RINGER }
+    private enum class Mode { IDLE, CALL, MEDIA, MEDIA_EXPANDED, NOTICE, CHARGING, RINGER }
 
     private sealed class Transient {
         data class NoticeT(val notice: Notice) : Transient()
@@ -49,6 +49,8 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
 
     private val handler = Handler(Looper.getMainLooper())
     private var media: MediaInfo? = null
+    private var call: CallInfo? = null
+    private var callDismissed: String? = null
     private var mediaArt: DotArt? = null
     private var mediaArtSmall: DotArt? = null
     private var mediaPicture: PictureArt? = null
@@ -173,6 +175,12 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         resolve()
     }
 
+    fun setCall(info: CallInfo?) {
+        call = info
+        if (info == null) callDismissed = null
+        resolve()
+    }
+
     fun setMedia(info: MediaInfo?) {
         val old = media
         media = info
@@ -272,7 +280,9 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             t is Transient.NoticeT -> Mode.NOTICE
             t is Transient.ChargeT -> Mode.CHARGING
             t is Transient.RingerT -> Mode.RINGER
-            mediaVisible() -> if (mediaExpanded) Mode.MEDIA_EXPANDED else Mode.MEDIA
+            mediaExpanded && mediaVisible() -> Mode.MEDIA_EXPANDED
+            call != null && call?.key != callDismissed -> Mode.CALL
+            mediaVisible() -> Mode.MEDIA
             else -> Mode.IDLE
         }
         if (mode == Mode.IDLE) mediaExpanded = false
@@ -282,7 +292,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         val bigW = min(resources.displayMetrics.widthPixels - context.dp(24f), context.dp(360f))
         val (w, h) = when (mode) {
             Mode.IDLE -> idleW to idleH
-            Mode.MEDIA, Mode.CHARGING, Mode.RINGER -> idleW + 2 * context.dp(SIDE_DP) to idleH
+            Mode.MEDIA, Mode.CHARGING, Mode.RINGER, Mode.CALL -> idleW + 2 * context.dp(SIDE_DP) to idleH
             Mode.NOTICE -> bigW to idleH + context.dp(60f)
             Mode.MEDIA_EXPANDED -> bigW to idleH + context.dp(172f)
         }
@@ -299,6 +309,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             Mode.NOTICE -> (t as Transient.NoticeT).notice.key + t.notice.title + t.notice.text
             Mode.MEDIA, Mode.MEDIA_EXPANDED -> mode.name + media?.title
             Mode.CHARGING, Mode.RINGER -> t
+            Mode.CALL -> call?.key
             Mode.IDLE -> Mode.IDLE
         }
         if (mode != pendingMode || token != pendingToken) {
@@ -357,8 +368,10 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
     private fun animating() =
         springW.moving || springH.moving || springAlpha.moving || springScale.moving || fadingOut || contentAlpha < 1f
 
-    private fun needsTicker() = screenOn && springAlpha.value > 0f &&
-        (shownMode == Mode.MEDIA || shownMode == Mode.MEDIA_EXPANDED) && media?.playing == true
+    private fun needsTicker() = screenOn && springAlpha.value > 0f && (
+        ((shownMode == Mode.MEDIA || shownMode == Mode.MEDIA_EXPANDED) && media?.playing == true) ||
+            shownMode == Mode.CALL
+        )
 
     private fun kick() {
         if (frameScheduled || !isAttachedToWindow) {
@@ -422,6 +435,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         when (shownMode) {
             Mode.IDLE -> Unit
             Mode.MEDIA -> drawMediaCompact(canvas, alpha)
+            Mode.CALL -> drawCall(canvas, alpha)
             Mode.MEDIA_EXPANDED -> drawMediaExpanded(canvas, alpha)
             Mode.NOTICE -> (shownTransient as? Transient.NoticeT)?.let { drawNotice(canvas, it.notice, alpha) }
             Mode.CHARGING -> (shownTransient as? Transient.ChargeT)?.let { drawCharging(canvas, it, alpha) }
@@ -440,10 +454,38 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
     private fun drawMediaCompact(canvas: Canvas, alpha: Int) {
         val m = media ?: return
         val cy = pillRect.top + topZone / 2f
-        val s = context.dp(18f)
+        val s = compactSize(18f)
         box.set(leftSlotStart(), cy - s / 2f, leftSlotStart() + s, cy + s / 2f)
         drawArt(canvas, box, small = true, alpha = alpha)
-        drawVisualizer(canvas, rightSlotEnd(), cy, context.dp(3.8f), 4, 4, m.playing, alpha)
+        drawVisualizer(canvas, rightSlotEnd(), cy, compactSize(15f) / 4f, 4, 4, m.playing, alpha)
+    }
+
+    /** A compact-state element size: its natural size, shrunk to fit a slimmer pill. */
+    private fun compactSize(naturalDp: Float) = min(context.dp(naturalDp), topZone * 0.64f)
+
+    /** Call in progress: a breathing red dot on the left, the running timer on the right. */
+    private fun drawCall(canvas: Canvas, alpha: Int) {
+        val c = call ?: return
+        val cy = pillRect.top + topZone / 2f
+        val t = SystemClock.uptimeMillis() / 1000f
+        val pulse = 0.55f + 0.45f * ((sin(t * 3.2f) + 1f) / 2f)
+        val r = compactSize(10f) / 2f
+        val x0 = leftSlotStart() + r
+        dotPaint.color = Look.RED
+        dotPaint.alpha = (alpha * 0.35f * pulse).roundToInt()
+        canvas.drawCircle(x0, cy, r * (1f + 0.6f * pulse), dotPaint)
+        dotPaint.alpha = alpha
+        canvas.drawCircle(x0, cy, r * 0.7f, dotPaint)
+
+        val secs = ((System.currentTimeMillis() - c.startedAt) / 1000).coerceAtLeast(0)
+        val txt = fmt(secs * 1000)
+        bigDotPaint.color = Look.WHITE
+        bigDotPaint.alpha = alpha
+        val size = bigDotPaint.textSize
+        bigDotPaint.textSize = min(size, compactSize(15f) * 1.05f)
+        val tw = bigDotPaint.measureText(txt)
+        drawText(canvas, txt, rightSlotEnd() - tw, cy, tw + 1f, bigDotPaint, centerY = true)
+        bigDotPaint.textSize = size
     }
 
     private fun drawArt(canvas: Canvas, b: RectF, small: Boolean, alpha: Int) {
@@ -661,7 +703,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         var x = leftSlotStart()
         if (c.charging) {
             glyphPaint.color = tint; glyphPaint.alpha = alpha
-            val gs = context.dp(15f)
+            val gs = compactSize(15f)
             Glyph.BOLT.draw(canvas, x, cy, gs, glyphPaint)
             x += Glyph.BOLT.width(gs) + context.dp(6f)
         }
@@ -676,13 +718,16 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         bigDotPaint.color = tint
         bigDotPaint.alpha = alpha
         val txt = "${c.level}%"
+        val size = bigDotPaint.textSize
+        bigDotPaint.textSize = min(size, compactSize(15f) * 1.05f)
         val tw = bigDotPaint.measureText(txt)
         drawText(canvas, txt, rightSlotEnd() - tw, cy, tw + 1f, bigDotPaint, centerY = true)
+        bigDotPaint.textSize = size
     }
 
     private fun drawRinger(canvas: Canvas, mode: Int, alpha: Int) {
         val cy = pillRect.top + topZone / 2f
-        val gs = context.dp(14f)
+        val gs = compactSize(14f)
         val x = leftSlotStart()
         glyphPaint.alpha = alpha
         val label = when (mode) {
@@ -706,7 +751,8 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         bigDotPaint.alpha = alpha
         val slot = rightSlotEnd() - (pillRect.centerX() + context.dp(CAMERA_CLEAR_DP))
         val size = bigDotPaint.textSize
-        bigDotPaint.textSize = min(size, size * slot / max(1f, bigDotPaint.measureText(label)))
+        bigDotPaint.textSize = min(size, compactSize(15f) * 1.05f)
+        bigDotPaint.textSize = min(bigDotPaint.textSize, bigDotPaint.textSize * slot / max(1f, bigDotPaint.measureText(label)))
         val tw = bigDotPaint.measureText(label)
         drawText(canvas, label, rightSlotEnd() - tw, cy, tw + 1f, bigDotPaint, centerY = true)
         bigDotPaint.textSize = size
@@ -746,6 +792,8 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             when (shownMode) {
                 Mode.IDLE -> host.openSettings()
                 Mode.MEDIA -> { mediaExpanded = true; buzz(); resolve() }
+                // During a call, long-press opens the music player if something's playing.
+                Mode.CALL -> if (media != null && prefs.showMedia) { mediaExpanded = true; buzz(); resolve() }
                 else -> Unit
             }
         }
@@ -789,6 +837,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         when (shownMode) {
             Mode.IDLE -> { springScale.target = 1.06f; kick(); handler.postDelayed({ springScale.target = 1f; kick() }, 120) }
             Mode.MEDIA -> { mediaExpanded = true; buzz(); resolve() }
+            Mode.CALL -> { call?.intent?.let { send(it) }; buzz() }
             Mode.MEDIA_EXPANDED -> tapExpandedMedia(x, y)
             Mode.NOTICE -> (shownTransient as? Transient.NoticeT)?.notice?.let { n ->
                 n.intent?.let { send(it) }
@@ -897,6 +946,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         when (shownMode) {
             Mode.MEDIA_EXPANDED -> mediaExpanded = false
             Mode.MEDIA -> mediaDismissed = media
+            Mode.CALL -> callDismissed = call?.key
             Mode.NOTICE, Mode.CHARGING, Mode.RINGER -> { endTransient(); return }
             Mode.IDLE -> Unit
         }

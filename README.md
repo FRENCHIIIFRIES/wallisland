@@ -7,6 +7,7 @@ design language: black, white, one red, and dots everywhere.
 |---|---|
 | ![Media, compact](docs/screens/media-compact.png) | ![Charging](docs/screens/charging.png) |
 | ![Notification](docs/screens/notification.png) | ![Silent](docs/screens/silent.png) |
+| ![Call](docs/screens/call.png) | |
 
 | ![Now playing, dot art](docs/screens/media-expanded.png) | ![Now playing, cover art](docs/screens/media-expanded-cover.png) |
 |---|---|
@@ -23,6 +24,8 @@ design language: black, white, one red, and dots everywhere.
   - Tap the song title to open the music app.
 - **Notifications.** Only alerts that would make a sound open the island. Chats show the latest
   message. Tap to open the notification, or swipe up to dismiss it.
+- **Calls.** During a phone, WhatsApp, Instagram or other call, the island shows a breathing red
+  dot and a live call timer. Tap it to return to the call, or swipe up to hide it.
 - **Charging and low battery.** A five-dot gauge and the percentage in Doto. It turns red at 20%.
 - **Ring / vibrate / silent.** A short confirmation whenever the ringer mode changes.
 - **Gestures.** Tap to expand or open, swipe up to dismiss, swipe down to expand, long-press the

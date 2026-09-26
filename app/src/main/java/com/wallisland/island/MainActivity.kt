@@ -170,7 +170,8 @@ class MainActivity : Activity() {
         val lp = { LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(8) } }
         row.addView(demo("Notice", IslandService.ACTION_DEMO_NOTICE), lp())
         row.addView(demo("Music", IslandService.ACTION_DEMO_MEDIA), lp())
-        row.addView(demo("Charge", IslandService.ACTION_DEMO_CHARGE),
+        row.addView(demo("Charge", IslandService.ACTION_DEMO_CHARGE), lp())
+        row.addView(demo("Call", IslandService.ACTION_DEMO_CALL),
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         col.addView(row)
         col.addView(hint("Tap music in the island to expand it. Swipe up to dismiss, long-press the empty pill for settings."))

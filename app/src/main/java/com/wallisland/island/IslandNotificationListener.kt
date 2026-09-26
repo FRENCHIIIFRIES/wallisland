@@ -47,6 +47,11 @@ class IslandNotificationListener : NotificationListenerService() {
         val msm = getSystemService(MediaSessionManager::class.java)
         sessions = msm
         val me = ComponentName(this, IslandNotificationListener::class.java)
+        // Pick up a call that was already going when we (re)connected.
+        try {
+            activeNotifications?.firstOrNull { isCall(it) }?.let { IslandHub.postCall(toCall(it)) }
+        } catch (_: Exception) {
+        }
         try {
             msm.addOnActiveSessionsChangedListener(sessionsChanged, me, main)
             bindControllers(msm.getActiveSessions(me))
@@ -69,12 +74,17 @@ class IslandNotificationListener : NotificationListenerService() {
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification, rankingMap: RankingMap?) {
+        if (isCall(sbn)) {
+            IslandHub.postCall(toCall(sbn))
+            return
+        }
         val notice = toNotice(sbn, rankingMap) ?: return
         IslandHub.postNotice(notice)
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
         seen.remove(sbn.key)
+        if (IslandHub.call?.key == sbn.key) IslandHub.postCall(null)
         IslandHub.removeNotice(sbn.key)
     }
 
@@ -131,6 +141,31 @@ class IslandNotificationListener : NotificationListenerService() {
             avatar = avatar,
             intent = n.contentIntent,
             autoCancel = n.flags and Notification.FLAG_AUTO_CANCEL != 0,
+        )
+    }
+
+    /** Ongoing call notifications (phone, WhatsApp, Instagram, Meet…) use the "call" category. */
+    private fun isCall(sbn: StatusBarNotification): Boolean {
+        val n = sbn.notification ?: return false
+        if (sbn.packageName == packageName) return false
+        return n.category == Notification.CATEGORY_CALL && sbn.isOngoing
+    }
+
+    private fun toCall(sbn: StatusBarNotification): CallInfo {
+        val n = sbn.notification
+        val extras = n.extras
+        val name = (extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim()).orEmpty()
+        // Apps with a running call timer set `when` to the call start; otherwise count from the post time.
+        val usesChrono = extras?.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER) == true
+        val start = if (usesChrono && n.`when` > 0) n.`when` else sbn.postTime
+        val previous = IslandHub.call
+        return CallInfo(
+            key = sbn.key,
+            pkg = sbn.packageName,
+            appName = appLabel(this, sbn.packageName),
+            name = name,
+            startedAt = if (previous?.key == sbn.key && !usesChrono) previous.startedAt else start,
+            intent = n.contentIntent,
         )
     }
 

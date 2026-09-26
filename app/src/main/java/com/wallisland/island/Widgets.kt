@@ -184,7 +184,8 @@ fun pillButton(ctx: Context, label: String, filled: Boolean = false, onClick: ()
         letterSpacing = 0.06f
         gravity = Gravity.CENTER
         setTextColor(if (filled) Look.BLACK else Look.WHITE)
-        setPadding(ctx.dp(18), ctx.dp(10), ctx.dp(18), ctx.dp(10))
+        setPadding(ctx.dp(12), ctx.dp(10), ctx.dp(12), ctx.dp(10))
+        maxLines = 1
         val shape = GradientDrawable().apply {
             cornerRadius = ctx.dp(100f)
             if (filled) setColor(Look.WHITE) else {

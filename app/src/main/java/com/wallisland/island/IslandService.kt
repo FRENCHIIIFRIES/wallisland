@@ -85,6 +85,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
             ACTION_DEMO_NOTICE -> island?.showNotice(demoNotice())
             ACTION_DEMO_CHARGE -> island?.showCharging(if (batteryLevel >= 0) batteryLevel else 76, true)
             ACTION_DEMO_MEDIA -> demoMedia()
+            ACTION_DEMO_CALL -> demoCall()
             ACTION_PREVIEW -> island?.preview()
         }
         return START_STICKY
@@ -335,6 +336,10 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         island?.removeNotice(key)
     }
 
+    override fun onCall(call: CallInfo?) {
+        island?.setCall(call)
+    }
+
     override fun onMedia(media: MediaInfo?) {
         if (demoRestore != null) return
         island?.setMedia(media)
@@ -414,6 +419,15 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         autoCancel = false,
     )
 
+    private fun demoCall() {
+        val demo = CallInfo(
+            key = "demo:call", pkg = packageName, appName = "Demo", name = "Demo call",
+            startedAt = System.currentTimeMillis() - 83_000, intent = null,
+        )
+        island?.setCall(demo)
+        main.postDelayed({ island?.setCall(IslandHub.call) }, 12_000)
+    }
+
     private fun demoMedia() {
         demoRestore?.let { main.removeCallbacks(it) }
         val start = SystemClock.elapsedRealtime()
@@ -438,6 +452,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         const val ACTION_DEMO_NOTICE = "com.wallisland.island.DEMO_NOTICE"
         const val ACTION_DEMO_CHARGE = "com.wallisland.island.DEMO_CHARGE"
         const val ACTION_DEMO_MEDIA = "com.wallisland.island.DEMO_MEDIA"
+        const val ACTION_DEMO_CALL = "com.wallisland.island.DEMO_CALL"
         const val ACTION_PREVIEW = "com.wallisland.island.PREVIEW"
 
         @Volatile var running = false

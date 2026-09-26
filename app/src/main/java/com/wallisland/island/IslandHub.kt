@@ -19,6 +19,17 @@ data class Notice(
     val autoCancel: Boolean,
 )
 
+/** A call in progress (or ringing), from a call-style notification. */
+data class CallInfo(
+    val key: String,
+    val pkg: String,
+    val appName: String,
+    val name: String,
+    /** Wall-clock start of the call, for the timer. */
+    val startedAt: Long,
+    val intent: PendingIntent?,
+)
+
 /** Whatever is currently playing. */
 data class MediaInfo(
     val pkg: String,
@@ -55,12 +66,14 @@ object IslandHub {
         fun onNotice(notice: Notice)
         fun onNoticeRemoved(key: String)
         fun onMedia(media: MediaInfo?)
+        fun onCall(call: CallInfo?)
     }
 
     var listener: Listener? = null
         set(value) {
             field = value
             value?.onMedia(media)
+            value?.onCall(call)
         }
 
     var media: MediaInfo? = null
@@ -75,6 +88,14 @@ object IslandHub {
 
     fun removeNotice(key: String) {
         listener?.onNoticeRemoved(key)
+    }
+
+    var call: CallInfo? = null
+        private set
+
+    fun postCall(info: CallInfo?) {
+        call = info
+        listener?.onCall(info)
     }
 
     fun postMedia(info: MediaInfo?) {
