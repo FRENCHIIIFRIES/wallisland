@@ -93,11 +93,11 @@ class NToggle(context: Context) : View(context) {
         rect.set(s, s, width - s, height - s)
         val r = rect.height() / 2f
         paint.style = Paint.Style.FILL
-        paint.color = blend(Look.BLACK, Look.RED, t)
+        paint.color = blend(Look.BLACK, Look.accent, t)
         canvas.drawRoundRect(rect, r, r, paint)
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = s
-        paint.color = blend(Look.GREY, Look.RED, t)
+        paint.color = blend(Look.GREY, Look.accent, t)
         canvas.drawRoundRect(rect, r, r, paint)
         paint.style = Paint.Style.FILL
         paint.color = blend(Look.GREY, Look.WHITE, t)
@@ -141,7 +141,7 @@ class NSlider(context: Context, private val min: Int, private val max: Int) : Vi
             paint.color = if (x <= thumbX) Look.WHITE else Look.DOT_OFF
             canvas.drawCircle(x, cy, context.dp(1.8f), paint)
         }
-        paint.color = Look.RED
+        paint.color = Look.accent
         canvas.drawCircle(thumbX, cy, context.dp(8f), paint)
         paint.color = Look.BLACK
         canvas.drawCircle(thumbX, cy, context.dp(2.5f), paint)

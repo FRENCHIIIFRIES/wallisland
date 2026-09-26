@@ -1,5 +1,6 @@
 package com.wallisland.island
 
+import android.annotation.SuppressLint
 import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
@@ -67,6 +68,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
     override fun onCreate() {
         super.onCreate()
         prefs = Prefs(this)
+        Look.accent = prefs.accent
         chooseHost()
         goForeground()
         if (!canHost(this) || !prefs.enabled) {
@@ -89,6 +91,11 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
             ACTION_DEMO_CHARGE -> island?.showCharging(if (batteryLevel >= 0) batteryLevel else 76, true)
             ACTION_DEMO_MEDIA -> demoMedia()
             ACTION_DEMO_CALL -> demoCall()
+            ACTION_DEMO_TIMER -> demoLive(LiveInfo.Kind.TIMER)
+            ACTION_DEMO_NAV -> demoLive(LiveInfo.Kind.NAV)
+            ACTION_DEMO_PROGRESS -> demoLive(LiveInfo.Kind.PROGRESS)
+            ACTION_DEMO_UNLOCK -> island?.showUnlock()
+            ACTION_DEMO_BUDS -> island?.showBuds(78)
             ACTION_PREVIEW -> island?.preview()
         }
         return START_STICKY
@@ -407,6 +414,126 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
+    // ---- Quick toggles -------------------------------------------------------------------------------------
+
+    private var torchId: String? = null
+    private var torchOn = false
+
+    private val torchCallback = object : CameraManager.TorchCallback() {
+        override fun onTorchModeChanged(cameraId: String, enabled: Boolean) {
+            if (cameraId != torchId) return
+            torchOn = enabled
+            island?.refreshQuick()
+        }
+    }
+
+    private fun findTorch(): String? = try {
+        val cm = getSystemService(CameraManager::class.java)
+        cm.cameraIdList.firstOrNull { id ->
+            val c = cm.getCameraCharacteristics(id)
+            c.get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) == true &&
+                c.get(android.hardware.camera2.CameraCharacteristics.LENS_FACING) ==
+                android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK
+        }
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun autoRotate(): Boolean =
+        Settings.System.getInt(contentResolver, Settings.System.ACCELEROMETER_ROTATION, 1) == 1
+
+    override fun quickState(): IslandView.QuickState {
+        val am = getSystemService(AudioManager::class.java)
+        return IslandView.QuickState(
+            torch = torchOn,
+            torchAvailable = torchId != null,
+            ringerMode = am?.ringerMode ?: AudioManager.RINGER_MODE_NORMAL,
+            autoRotate = autoRotate(),
+        )
+    }
+
+    override fun quickAction(action: IslandView.Quick) {
+        when (action) {
+            IslandView.Quick.TORCH -> torchId?.let { id ->
+                try {
+                    getSystemService(CameraManager::class.java).setTorchMode(id, !torchOn)
+                } catch (_: Exception) {
+                    toast("The torch is busy")
+                }
+            }
+            IslandView.Quick.RINGER -> {
+                val am = getSystemService(AudioManager::class.java) ?: return
+                val next = when (am.ringerMode) {
+                    AudioManager.RINGER_MODE_NORMAL -> AudioManager.RINGER_MODE_VIBRATE
+                    AudioManager.RINGER_MODE_VIBRATE -> AudioManager.RINGER_MODE_SILENT
+                    else -> AudioManager.RINGER_MODE_NORMAL
+                }
+                try {
+                    am.ringerMode = next
+                } catch (_: SecurityException) {
+                    // Silent needs Do Not Disturb access; skip straight back to ring without it.
+                    try {
+                        am.ringerMode = AudioManager.RINGER_MODE_NORMAL
+                    } catch (_: SecurityException) {
+                    }
+                }
+            }
+            IslandView.Quick.ROTATE -> {
+                if (!Settings.System.canWrite(this)) {
+                    toast("Allow Wallisland to change system settings, then try again")
+                    startActivity(
+                        Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, android.net.Uri.parse("package:$packageName"))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                    return
+                }
+                Settings.System.putInt(contentResolver, Settings.System.ACCELEROMETER_ROTATION, if (autoRotate()) 0 else 1)
+            }
+            IslandView.Quick.SETTINGS -> openSettings()
+        }
+        island?.refreshQuick()
+    }
+
+    private fun toast(msg: String) = android.widget.Toast.makeText(this, msg, android.widget.Toast.LENGTH_SHORT).show()
+
+    // ---- Earbuds ---------------------------------------------------------------------------------------------
+
+    private var budsShownAt = 0L
+
+    @SuppressLint("MissingPermission")
+    private fun onBluetooth(intent: Intent) {
+        if (Build.VERSION.SDK_INT >= 31 &&
+            checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) return
+        @Suppress("DEPRECATION")
+        val device = intent.getParcelableExtra<android.bluetooth.BluetoothDevice>(android.bluetooth.BluetoothDevice.EXTRA_DEVICE)
+            ?: return
+        val audio = try {
+            device.bluetoothClass?.majorDeviceClass == android.bluetooth.BluetoothClass.Device.Major.AUDIO_VIDEO
+        } catch (_: Exception) {
+            false
+        }
+        if (!audio) return
+        when (intent.action) {
+            android.bluetooth.BluetoothDevice.ACTION_ACL_CONNECTED -> {
+                budsShownAt = SystemClock.uptimeMillis()
+                island?.showBuds(budsBattery(device))
+            }
+            ACTION_BT_BATTERY -> {
+                // Earbuds report battery a moment after connecting; update the pop-up if it's still fresh.
+                val level = intent.getIntExtra(EXTRA_BT_BATTERY, -1)
+                if (level >= 0 && SystemClock.uptimeMillis() - budsShownAt < 6000) island?.showBuds(level)
+            }
+        }
+    }
+
+    /** Battery level of a connected Bluetooth device, when the system knows it (hidden API, best effort). */
+    private fun budsBattery(device: android.bluetooth.BluetoothDevice): Int = try {
+        device.javaClass.getMethod("getBatteryLevel").invoke(device) as Int
+    } catch (_: Throwable) {
+        -1
+    }
+
     // ---- IslandHub.Listener ------------------------------------------------------------------------------
 
     override fun onNotice(notice: Notice) {
@@ -415,6 +542,11 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
 
     override fun onNoticeRemoved(key: String) {
         island?.removeNotice(key)
+    }
+
+    override fun onLive(live: List<LiveInfo>) {
+        if (demoLiveRestore != null) return
+        island?.setLive(live)
     }
 
     override fun onCall(call: CallInfo?) {
@@ -469,6 +601,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
     private fun unregisterCaptureWatchers() {
         try {
             getSystemService(CameraManager::class.java)?.unregisterAvailabilityCallback(cameraCallback)
+            getSystemService(CameraManager::class.java)?.unregisterTorchCallback(torchCallback)
             getSystemService(AudioManager::class.java)?.unregisterAudioRecordingCallback(recordingCallback)
         } catch (_: Exception) {
         }
@@ -484,7 +617,9 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
                 it.clientAudioSource == MediaRecorder.AudioSource.CAMCORDER ||
                 it.clientAudioSource == MediaRecorder.AudioSource.UNPROCESSED
         }
-        val now = camerasInUse.isNotEmpty() || recorder
+        // The torch holds the back camera too; that isn't "recording".
+        val cams = if (torchOn) camerasInUse - setOfNotNull(torchId) else camerasInUse
+        val now = cams.isNotEmpty() || recorder
         main.removeCallbacks(applyCapture)
         if (now) {
             if (!capturing) main.postDelayed(applyCapture, 800)
@@ -536,6 +671,8 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
                     if (isInitialStickyBroadcast) return
                     island?.showRinger(intent.getIntExtra(AudioManager.EXTRA_RINGER_MODE, AudioManager.RINGER_MODE_NORMAL))
                 }
+                Intent.ACTION_USER_PRESENT -> island?.showUnlock()
+                android.bluetooth.BluetoothDevice.ACTION_ACL_CONNECTED, ACTION_BT_BATTERY -> onBluetooth(intent)
             }
         }
     }
@@ -548,6 +685,14 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
             addAction(Intent.ACTION_POWER_DISCONNECTED)
             addAction(Intent.ACTION_BATTERY_CHANGED)
             addAction(AudioManager.RINGER_MODE_CHANGED_ACTION)
+            addAction(Intent.ACTION_USER_PRESENT)
+            addAction(android.bluetooth.BluetoothDevice.ACTION_ACL_CONNECTED)
+            addAction(ACTION_BT_BATTERY)
+        }
+        torchId = findTorch()
+        try {
+            getSystemService(CameraManager::class.java)?.registerTorchCallback(torchCallback, main)
+        } catch (_: Exception) {
         }
         if (Build.VERSION.SDK_INT >= 33) {
             registerReceiver(receiver, f, Context.RECEIVER_NOT_EXPORTED)
@@ -558,6 +703,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
     }
 
     override fun onSharedPreferenceChanged(sp: SharedPreferences?, key: String?) {
+        Look.accent = prefs.accent
         if (key == Prefs.KEY_ENABLED && !prefs.enabled) {
             stopSelf()
             return
@@ -580,6 +726,32 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         intent = null,
         autoCancel = false,
     )
+
+    private var demoLiveRestore: Runnable? = null
+
+    private fun demoLive(kind: LiveInfo.Kind) {
+        demoLiveRestore?.let { main.removeCallbacks(it) }
+        val now = System.currentTimeMillis()
+        val demo = LiveInfo(
+            key = "demo:live", kind = kind, pkg = packageName, appName = "Demo",
+            title = when (kind) {
+                LiveInfo.Kind.NAV -> "200 m"
+                LiveInfo.Kind.TIMER -> "Timer"
+                LiveInfo.Kind.PROGRESS -> "Downloading"
+            },
+            text = "", icon = null,
+            chronoBase = if (kind == LiveInfo.Kind.TIMER) now + 5 * 60_000 else 0L, countDown = true,
+            staticTime = null, progress = 43, progressMax = 100, indeterminate = false,
+            postedAt = now, intent = null,
+        )
+        island?.setLive(listOf(demo))
+        val restore = Runnable {
+            demoLiveRestore = null
+            island?.setLive(IslandHub.currentLive())
+        }
+        demoLiveRestore = restore
+        main.postDelayed(restore, 12_000)
+    }
 
     private fun demoCall() {
         val demo = CallInfo(
@@ -615,6 +787,15 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         const val ACTION_DEMO_CHARGE = "com.wallisland.island.DEMO_CHARGE"
         const val ACTION_DEMO_MEDIA = "com.wallisland.island.DEMO_MEDIA"
         const val ACTION_DEMO_CALL = "com.wallisland.island.DEMO_CALL"
+        const val ACTION_DEMO_TIMER = "com.wallisland.island.DEMO_TIMER"
+        const val ACTION_DEMO_NAV = "com.wallisland.island.DEMO_NAV"
+        const val ACTION_DEMO_PROGRESS = "com.wallisland.island.DEMO_PROGRESS"
+        const val ACTION_DEMO_UNLOCK = "com.wallisland.island.DEMO_UNLOCK"
+        const val ACTION_DEMO_BUDS = "com.wallisland.island.DEMO_BUDS"
+
+        /** Hidden-API broadcast the Bluetooth stack sends when a device reports its battery. */
+        private const val ACTION_BT_BATTERY = "android.bluetooth.device.action.BATTERY_LEVEL_CHANGED"
+        private const val EXTRA_BT_BATTERY = "android.bluetooth.device.extra.BATTERY_LEVEL"
         const val ACTION_PREVIEW = "com.wallisland.island.PREVIEW"
 
         @Volatile var running = false

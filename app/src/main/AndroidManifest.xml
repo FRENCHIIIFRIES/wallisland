@@ -11,6 +11,11 @@
     <!-- In-app updates from this app's GitHub releases. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Earbuds pop-up: see when Bluetooth audio connects and read its battery. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- Quick toggles: rotation lock. -->
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
 
     <!-- So app names and icons of launcher apps can be shown next to their notifications. -->
     <queries>
@@ -37,6 +42,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".AppsActivity"
+            android:exported="false"
+            android:label="Apps" />
 
         <service
             android:name=".IslandService"

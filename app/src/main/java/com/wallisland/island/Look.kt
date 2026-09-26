@@ -19,6 +19,21 @@ object Look {
     const val WHITE = 0xFFF2F2F2.toInt()
     const val RED = 0xFFD71921.toInt()
 
+    /** The one colour in the UI. Nothing red unless the user picks another in settings. */
+    @Volatile var accent = RED
+
+    /** Accent choices offered in settings, as (name, colour). */
+    val ACCENTS = listOf(
+        "Red" to RED,
+        "Orange" to 0xFFFF6A1A.toInt(),
+        "Yellow" to 0xFFFFC21A.toInt(),
+        "Green" to 0xFF2ED573.toInt(),
+        "Blue" to 0xFF2F80FF.toInt(),
+        "Purple" to 0xFF9B5CFF.toInt(),
+        "Pink" to 0xFFFF4D97.toInt(),
+        "White" to WHITE,
+    )
+
     @Volatile private var dotFace: Typeface? = null
     @Volatile private var monoFace: Typeface? = null
     @Volatile private var monoBoldFace: Typeface? = null
@@ -148,6 +163,96 @@ enum class Glyph(vararg rows: String) {
         ".#...#.",
         ".#...#.",
         "#######",
+        "...#...",
+    ),
+    TIMER(
+        "..###..",
+        ".#.#.#.",
+        "#..#..#",
+        "#..##.#",
+        "#.....#",
+        ".#...#.",
+        "..###..",
+    ),
+    ARROW(
+        "...#...",
+        "..###..",
+        ".#####.",
+        "#######",
+        "..###..",
+        "..###..",
+        "..###..",
+    ),
+    LOCK(
+        "..###..",
+        ".#...#.",
+        ".#...#.",
+        "#######",
+        "###.###",
+        "###.###",
+        "#######",
+    ),
+    UNLOCK(
+        "...###.",
+        "..#...#",
+        "......#",
+        "#######",
+        "###.###",
+        "###.###",
+        "#######",
+    ),
+    CHECK(
+        ".......",
+        "......#",
+        ".....##",
+        "#...##.",
+        "##.##..",
+        ".###...",
+        "..#....",
+    ),
+    HEADPHONES(
+        "..###..",
+        ".#...#.",
+        "#.....#",
+        "#.....#",
+        "##...##",
+        "##...##",
+        "##...##",
+    ),
+    TORCH(
+        "#######",
+        "#######",
+        ".#####.",
+        "..###..",
+        "..#.#..",
+        "..###..",
+        "..###..",
+    ),
+    ROTATE(
+        "..###.#",
+        ".#...##",
+        "#...###",
+        "#......",
+        "#.....#",
+        ".#...#.",
+        "..###..",
+    ),
+    GEAR(
+        "...#...",
+        ".#####.",
+        ".##.##.",
+        "###.###",
+        ".##.##.",
+        ".#####.",
+        "...#...",
+    ),
+    DOWNLOAD(
+        "..###..",
+        "..###..",
+        "..###..",
+        "#######",
+        ".#####.",
+        "..###..",
         "...#...",
     );
 

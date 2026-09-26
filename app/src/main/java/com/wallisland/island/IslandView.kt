@@ -35,14 +35,24 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         fun onWindowSize(width: Int, height: Int)
         fun onTouchable(touchable: Boolean)
         fun openSettings()
+
+        /** Current state of the quick toggles (long-press panel). */
+        fun quickState(): QuickState
+        fun quickAction(action: Quick)
     }
 
-    private enum class Mode { IDLE, CALL, MEDIA, MEDIA_EXPANDED, NOTICE, CHARGING, RINGER }
+    data class QuickState(val torch: Boolean, val torchAvailable: Boolean, val ringerMode: Int, val autoRotate: Boolean)
+
+    enum class Quick { TORCH, RINGER, ROTATE, SETTINGS }
+
+    private enum class Mode { IDLE, CALL, LIVE, MEDIA, MEDIA_EXPANDED, NOTICE, CHARGING, RINGER, UNLOCK, BUDS, TOGGLES }
 
     private sealed class Transient {
         data class NoticeT(val notice: Notice) : Transient()
         data class ChargeT(val level: Int, val charging: Boolean) : Transient()
         data class RingerT(val mode: Int) : Transient()
+        data class UnlockT(val startedAt: Long) : Transient()
+        data class BudsT(val battery: Int) : Transient()
     }
 
     // ---- State -----------------------------------------------------------------------------------------
@@ -51,6 +61,9 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
     private var media: MediaInfo? = null
     private var call: CallInfo? = null
     private var callDismissed: String? = null
+    private var live: List<LiveInfo> = emptyList()
+    private val liveDismissed = HashSet<String>()
+    private var togglesOpen = false
     private var mediaArt: DotArt? = null
     private var mediaArtSmall: DotArt? = null
     private var mediaPicture: PictureArt? = null
@@ -179,6 +192,30 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         resolve()
     }
 
+    fun setLive(list: List<LiveInfo>) {
+        live = list
+        liveDismissed.retainAll(list.map { it.key }.toSet())
+        resolve()
+        invalidate()
+    }
+
+    fun showUnlock() {
+        if (!prefs.showUnlock || hidden) return
+        if (transient is Transient.NoticeT) return
+        showTransient(Transient.UnlockT(SystemClock.uptimeMillis()), 1500)
+    }
+
+    fun showBuds(battery: Int) {
+        if (!prefs.showBuds || hidden || !screenOn) return
+        if (transient is Transient.NoticeT) return
+        showTransient(Transient.BudsT(battery), 3500)
+    }
+
+    /** Refresh the quick-toggle panel after its state changed (torch, ringer, rotation). */
+    fun refreshQuick() {
+        if (togglesOpen) invalidate()
+    }
+
     fun setCall(info: CallInfo?) {
         call = info
         if (info == null) callDismissed = null
@@ -226,6 +263,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
     }
 
     fun showRinger(mode: Int) {
+        if (togglesOpen) { invalidate(); return }
         if (!prefs.showRinger || hidden || !screenOn) return
         if (transient is Transient.NoticeT) return
         showTransient(Transient.RingerT(mode), 2200)
@@ -236,6 +274,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         hidden = hide
         if (hide) {
             mediaExpanded = false
+            togglesOpen = false
             transient = null
         }
         resolve()
@@ -245,6 +284,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         screenOn = on
         if (!on) {
             mediaExpanded = false
+            togglesOpen = false
             transient = null
         }
         resolve()
@@ -258,6 +298,31 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
 
     private val transientTimeout = Runnable { endTransient() }
     private val pauseTimeout = Runnable { resolve() }
+    private val togglesTimeout = Runnable { closeToggles() }
+
+    private fun openToggles() {
+        togglesOpen = true
+        mediaExpanded = false
+        handler.removeCallbacks(togglesTimeout)
+        handler.postDelayed(togglesTimeout, 6000)
+        buzz()
+        resolve()
+    }
+
+    private fun closeToggles() {
+        handler.removeCallbacks(togglesTimeout)
+        if (!togglesOpen) return
+        togglesOpen = false
+        resolve()
+    }
+
+    /** The live activity worth showing: navigation first, then timers, then progress; newest wins ties. */
+    private fun currentLive(): LiveInfo? {
+        if (!prefs.showLive) return null
+        return live.filter { it.key !in liveDismissed }
+            .sortedWith(compareBy<LiveInfo> { it.kind.ordinal }.thenByDescending { it.postedAt })
+            .firstOrNull()
+    }
 
     private fun showTransient(t: Transient, durationMs: Long) {
         transient = t
@@ -284,8 +349,12 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             t is Transient.NoticeT -> Mode.NOTICE
             t is Transient.ChargeT -> Mode.CHARGING
             t is Transient.RingerT -> Mode.RINGER
+            t is Transient.UnlockT -> Mode.UNLOCK
+            t is Transient.BudsT -> Mode.BUDS
+            togglesOpen -> Mode.TOGGLES
             mediaExpanded && mediaVisible() -> Mode.MEDIA_EXPANDED
             call != null && call?.key != callDismissed -> Mode.CALL
+            currentLive() != null -> Mode.LIVE
             mediaVisible() -> Mode.MEDIA
             else -> Mode.IDLE
         }
@@ -296,7 +365,9 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         val bigW = min(resources.displayMetrics.widthPixels - context.dp(24f), context.dp(360f))
         val (w, h) = when (mode) {
             Mode.IDLE -> idleW to idleH
-            Mode.MEDIA, Mode.CHARGING, Mode.RINGER, Mode.CALL -> idleW + 2 * context.dp(SIDE_DP) to idleH
+            Mode.MEDIA, Mode.CHARGING, Mode.RINGER, Mode.CALL, Mode.LIVE, Mode.UNLOCK, Mode.BUDS ->
+                idleW + 2 * context.dp(SIDE_DP) to idleH
+            Mode.TOGGLES -> bigW to idleH + context.dp(84f)
             Mode.NOTICE -> bigW to idleH + context.dp(60f)
             Mode.MEDIA_EXPANDED -> bigW to idleH + context.dp(172f)
         }
@@ -314,6 +385,9 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             Mode.MEDIA, Mode.MEDIA_EXPANDED -> mode.name + media?.title
             Mode.CHARGING, Mode.RINGER -> t
             Mode.CALL -> call?.key
+            Mode.LIVE -> currentLive()?.key
+            Mode.UNLOCK, Mode.BUDS -> t
+            Mode.TOGGLES -> Mode.TOGGLES
             Mode.IDLE -> Mode.IDLE
         }
         if (mode != pendingMode || token != pendingToken) {
@@ -377,7 +451,8 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
 
     private fun needsTicker() = screenOn && springAlpha.value > 0f && (
         ((shownMode == Mode.MEDIA || shownMode == Mode.MEDIA_EXPANDED) && media?.playing == true) ||
-            shownMode == Mode.CALL
+            shownMode == Mode.CALL || shownMode == Mode.UNLOCK ||
+            (shownMode == Mode.LIVE && currentLive()?.let { it.kind == LiveInfo.Kind.TIMER || it.indeterminate } == true)
         )
 
     private fun kick() {
@@ -457,6 +532,10 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             Mode.NOTICE -> (shownTransient as? Transient.NoticeT)?.let { drawNotice(canvas, it.notice, alpha) }
             Mode.CHARGING -> (shownTransient as? Transient.ChargeT)?.let { drawCharging(canvas, it, alpha) }
             Mode.RINGER -> (shownTransient as? Transient.RingerT)?.let { drawRinger(canvas, it.mode, alpha) }
+            Mode.LIVE -> currentLive()?.let { drawLive(canvas, it, alpha) }
+            Mode.UNLOCK -> (shownTransient as? Transient.UnlockT)?.let { drawUnlock(canvas, it, alpha) }
+            Mode.BUDS -> (shownTransient as? Transient.BudsT)?.let { drawBuds(canvas, it.battery, alpha) }
+            Mode.TOGGLES -> drawToggles(canvas, alpha)
         }
         canvas.restore()
     }
@@ -511,7 +590,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         val pulse = 0.55f + 0.45f * ((sin(t * 3.2f) + 1f) / 2f)
         val r = compactSize(10f) / 2f
         val x0 = leftSlotStart() + r
-        dotPaint.color = Look.RED
+        dotPaint.color = Look.accent
         dotPaint.alpha = (alpha * 0.35f * pulse).roundToInt()
         canvas.drawCircle(x0, cy, r * (1f + 0.6f * pulse), dotPaint)
         dotPaint.alpha = alpha
@@ -548,7 +627,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
                         context.dp(if (small) 1.3f else 2.4f), dotPaint,
                     )
                 }
-                dotPaint.color = Look.RED; dotPaint.alpha = alpha
+                dotPaint.color = Look.accent; dotPaint.alpha = alpha
                 canvas.drawCircle(b.centerX(), b.centerY(), context.dp(if (small) 2.2f else 5f), dotPaint)
             }
         }
@@ -558,7 +637,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
     private fun eqColor(): Int = if (prefs.dotColor) mediaArt?.accent ?: Look.WHITE else Look.WHITE
 
     /** The peak dot: red on a white equaliser, white on a coloured one. */
-    private fun eqPeak(): Int = if (eqColor() == Look.WHITE) Look.RED else Look.WHITE
+    private fun eqPeak(): Int = if (eqColor() == Look.WHITE) Look.accent else Look.WHITE
 
     /** A fake-but-convincing equaliser: dot columns breathing on offset sine waves. */
     private fun drawVisualizer(canvas: Canvas, right: Float, cy: Float, pitch: Float, cols: Int, rows: Int, playing: Boolean, alpha: Int) {
@@ -598,7 +677,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         val x0 = pillRect.left + context.dp(22f)
         val cameraLeft = pillRect.centerX() - idleHalf - context.dp(8f)
         if (redDot) {
-            dotPaint.color = Look.RED; dotPaint.alpha = alpha
+            dotPaint.color = Look.accent; dotPaint.alpha = alpha
             canvas.drawCircle(x0 + context.dp(3f), cy, context.dp(3f), dotPaint)
         }
         val tx = x0 + if (redDot) context.dp(12f) else 0f
@@ -701,7 +780,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             canvas.drawCircle(x, barY, context.dp(1.5f), dotPaint)
         }
         if (dur > 0) {
-            dotPaint.color = Look.RED
+            dotPaint.color = Look.accent
             dotPaint.alpha = alpha
             canvas.drawCircle(headX, barY, context.dp(if (scrubbing) 4.6f else 3.2f), dotPaint)
         }
@@ -745,10 +824,138 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         return m.currentPosition()
     }
 
+    private val hitQuick = Array(4) { RectF() }
+    private val tint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val iconSrc = android.graphics.Rect()
+
+    /** Right-hand compact text, shrunk to fit between the camera and the pill's edge. */
+    private fun drawRightText(canvas: Canvas, text: String, color: Int, alpha: Int) {
+        val cy = pillRect.top + topZone / 2f
+        val slot = rightSlotEnd() - (pillRect.centerX() + context.dp(CAMERA_CLEAR_DP))
+        val size = bigDotPaint.textSize
+        bigDotPaint.textSize = min(size, compactSize(15f) * 1.05f)
+        bigDotPaint.textSize = min(bigDotPaint.textSize, bigDotPaint.textSize * slot / max(1f, bigDotPaint.measureText(text)))
+        bigDotPaint.color = color
+        bigDotPaint.alpha = alpha
+        val tw = bigDotPaint.measureText(text)
+        drawText(canvas, text, rightSlotEnd() - tw, cy, tw + 1f, bigDotPaint, centerY = true)
+        bigDotPaint.textSize = size
+    }
+
+    /** Timer, navigation or progress, compact: an icon left of the camera, the number right of it. */
+    private fun drawLive(canvas: Canvas, l: LiveInfo, alpha: Int) {
+        val cy = pillRect.top + topZone / 2f
+        val gs = compactSize(15f)
+        val x = leftSlotStart()
+        glyphPaint.alpha = alpha
+        when (l.kind) {
+            LiveInfo.Kind.NAV -> {
+                val icon = l.icon
+                if (icon != null) {
+                    // Maps' manoeuvre arrow, recoloured white.
+                    tint.colorFilter = android.graphics.PorterDuffColorFilter(Look.WHITE, android.graphics.PorterDuff.Mode.SRC_IN)
+                    tint.alpha = alpha
+                    iconSrc.set(0, 0, icon.width, icon.height)
+                    box.set(x, cy - gs / 2f, x + gs, cy + gs / 2f)
+                    canvas.drawBitmap(icon, iconSrc, box, tint)
+                } else {
+                    glyphPaint.color = Look.accent; glyphPaint.alpha = alpha
+                    Glyph.ARROW.draw(canvas, x, cy, gs, glyphPaint)
+                }
+                drawRightText(canvas, l.title.ifEmpty { l.text }, Look.WHITE, alpha)
+            }
+            LiveInfo.Kind.TIMER -> {
+                glyphPaint.color = Look.accent; glyphPaint.alpha = alpha
+                Glyph.TIMER.draw(canvas, x, cy, gs, glyphPaint)
+                drawRightText(canvas, l.timeText() ?: "--:--", Look.WHITE, alpha)
+            }
+            LiveInfo.Kind.PROGRESS -> {
+                // A ring of twelve dots that fills up; spins while the size is unknown.
+                val n = 12
+                val rr = gs / 2f - context.dp(1f)
+                val ccx = x + gs / 2f
+                val lit = if (l.indeterminate) -1 else (l.percent * n + 50) / 100
+                val spin = ((SystemClock.uptimeMillis() / 90) % n).toInt()
+                for (i in 0 until n) {
+                    val on = if (lit < 0) ((i - spin + n) % n) < 3 else i < lit
+                    dotPaint.color = if (on) Look.accent else Look.DOT_OFF
+                    dotPaint.alpha = alpha
+                    val ang = -Math.PI / 2 + Math.PI * 2 * i / n
+                    canvas.drawCircle(
+                        ccx + (rr * kotlin.math.cos(ang)).toFloat(),
+                        cy + (rr * kotlin.math.sin(ang)).toFloat(),
+                        context.dp(1.3f), dotPaint,
+                    )
+                }
+                drawRightText(canvas, if (l.indeterminate) "···" else "${l.percent}%", Look.WHITE, alpha)
+            }
+        }
+    }
+
+    /** Unlocked: the padlock opens, then a tick lands on the right. */
+    private fun drawUnlock(canvas: Canvas, t: Transient.UnlockT, alpha: Int) {
+        val cy = pillRect.top + topZone / 2f
+        val gs = compactSize(15f)
+        val el = SystemClock.uptimeMillis() - t.startedAt
+        glyphPaint.color = Look.WHITE
+        glyphPaint.alpha = alpha
+        (if (el < 380) Glyph.LOCK else Glyph.UNLOCK).draw(canvas, leftSlotStart(), cy, gs, glyphPaint)
+        val tick = ((el - 380) / 220f).coerceIn(0f, 1f)
+        if (tick > 0f) {
+            glyphPaint.color = Look.accent
+            glyphPaint.alpha = (alpha * tick).roundToInt()
+            Glyph.CHECK.draw(canvas, rightSlotEnd() - Glyph.CHECK.width(gs), cy, gs, glyphPaint)
+        }
+    }
+
+    /** Earbuds connected: headphones on the left, their battery on the right. */
+    private fun drawBuds(canvas: Canvas, battery: Int, alpha: Int) {
+        val cy = pillRect.top + topZone / 2f
+        glyphPaint.color = Look.WHITE
+        glyphPaint.alpha = alpha
+        Glyph.HEADPHONES.draw(canvas, leftSlotStart(), cy, compactSize(15f), glyphPaint)
+        val text = if (battery in 0..100) "$battery%" else "ON"
+        drawRightText(canvas, text, if (battery in 0..20) Look.accent else Look.WHITE, alpha)
+    }
+
+    /** Long-press panel: torch, sound mode, rotation and settings, as dot-matrix buttons. */
+    private fun drawToggles(canvas: Canvas, alpha: Int) {
+        drawHeader(canvas, "Quick", null, alpha)
+        val q = host.quickState()
+        val cy = pillRect.top + topZone + context.dp(26f)
+        val r = context.dp(21f)
+        val gs = context.dp(15f)
+        val step = pillRect.width() / 4f
+        labelPaint.alpha = alpha
+        for (i in 0 until 4) {
+            val cx = pillRect.left + step * (i + 0.5f)
+            val (glyph, label, active) = when (Quick.values()[i]) {
+                Quick.TORCH -> Triple(Glyph.TORCH, "TORCH", q.torch)
+                Quick.RINGER -> when (q.ringerMode) {
+                    AudioManager.RINGER_MODE_SILENT -> Triple(Glyph.BELL_OFF, "SILENT", true)
+                    AudioManager.RINGER_MODE_VIBRATE -> Triple(Glyph.VIBRATE, "VIBRATE", true)
+                    else -> Triple(Glyph.BELL, "RING", false)
+                }
+                Quick.ROTATE -> Triple(Glyph.ROTATE, if (q.autoRotate) "ROTATE" else "LOCKED", q.autoRotate)
+                Quick.SETTINGS -> Triple(Glyph.GEAR, "SETUP", false)
+            }
+            val dim = i == 0 && !q.torchAvailable
+            dotPaint.color = if (active) Look.WHITE else Look.RAISED
+            dotPaint.alpha = alpha
+            canvas.drawCircle(cx, cy, r, dotPaint)
+            glyphPaint.color = if (active) Look.BLACK else if (dim) Look.DOT_OFF else Look.WHITE
+            glyphPaint.alpha = alpha
+            glyph.draw(canvas, cx - glyph.width(gs) / 2f, cy, gs, glyphPaint)
+            val lw = labelPaint.measureText(label)
+            drawText(canvas, label, cx - lw / 2f, cy + r + context.dp(12f), lw + 1f, labelPaint, centerY = true)
+            hitQuick[i].set(cx - step / 2f, cy - r - context.dp(6f), cx + step / 2f, cy + r + context.dp(20f))
+        }
+    }
+
     private fun drawCharging(canvas: Canvas, c: Transient.ChargeT, alpha: Int) {
         val cy = pillRect.top + topZone / 2f
         val low = c.level <= 20
-        val tint = if (low) Look.RED else Look.WHITE
+        val tint = if (low) Look.accent else Look.WHITE
         var x = leftSlotStart()
         if (c.charging) {
             glyphPaint.color = tint; glyphPaint.alpha = alpha
@@ -781,7 +988,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         glyphPaint.alpha = alpha
         val label = when (mode) {
             AudioManager.RINGER_MODE_SILENT -> {
-                glyphPaint.color = Look.RED; glyphPaint.alpha = alpha
+                glyphPaint.color = Look.accent; glyphPaint.alpha = alpha
                 Glyph.BELL_OFF.draw(canvas, x, cy, gs, glyphPaint)
                 "SILENT"
             }
@@ -796,7 +1003,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
                 "RING"
             }
         }
-        bigDotPaint.color = if (mode == AudioManager.RINGER_MODE_SILENT) Look.RED else Look.WHITE
+        bigDotPaint.color = if (mode == AudioManager.RINGER_MODE_SILENT) Look.accent else Look.WHITE
         bigDotPaint.alpha = alpha
         val slot = rightSlotEnd() - (pillRect.centerX() + context.dp(CAMERA_CLEAR_DP))
         val size = bigDotPaint.textSize
@@ -839,16 +1046,21 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
 
         override fun onLongPress(e: MotionEvent) {
             when (shownMode) {
-                Mode.IDLE -> host.openSettings()
-                Mode.MEDIA -> { mediaExpanded = true; buzz(); resolve() }
-                // During a call, long-press opens the music player if something's playing.
-                Mode.CALL -> if (media != null && prefs.showMedia) { mediaExpanded = true; buzz(); resolve() }
+                // Long-press the pill (idle, music, call or a live activity) for quick toggles.
+                Mode.IDLE, Mode.MEDIA, Mode.CALL, Mode.LIVE -> openToggles()
                 else -> Unit
             }
         }
 
         override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
-            if (abs(vy) < abs(vx)) return false
+            if (abs(vy) < abs(vx)) {
+                // Swipe sideways on music to skip: left for next, right for previous.
+                if (shownMode == Mode.MEDIA || shownMode == Mode.MEDIA_EXPANDED) {
+                    skip(next = vx < 0)
+                    return true
+                }
+                return false
+            }
             if (vy < 0) swipeUp() else swipeDown()
             return true
         }
@@ -858,6 +1070,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_OUTSIDE) {
             if (mediaExpanded) { mediaExpanded = false; resolve() }
+            closeToggles()
             return false
         }
         if (springAlpha.target == 0f) return false
@@ -893,8 +1106,44 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
                 if (n.autoCancel) IslandHub.canceller?.invoke(n.key)
                 endTransient()
             }
-            Mode.CHARGING, Mode.RINGER -> endTransient()
+            Mode.CHARGING, Mode.RINGER, Mode.UNLOCK, Mode.BUDS -> endTransient()
+            Mode.LIVE -> { currentLive()?.intent?.let { send(it) }; buzz() }
+            Mode.TOGGLES -> tapToggles(x, y)
         }
+    }
+
+    private fun tapToggles(x: Float, y: Float) {
+        val hit = hitQuick.indexOfFirst { it.contains(x, y) }
+        if (hit < 0) {
+            closeToggles()
+            return
+        }
+        val action = Quick.values()[hit]
+        buzz()
+        if (action == Quick.SETTINGS) {
+            closeToggles()
+            host.openSettings()
+            return
+        }
+        host.quickAction(action)
+        handler.removeCallbacks(togglesTimeout)
+        handler.postDelayed(togglesTimeout, 6000)
+        invalidate()
+    }
+
+    private fun skip(next: Boolean) {
+        val m = media ?: return
+        val tc = m.controller?.transportControls
+        if (tc != null) {
+            if (next) tc.skipToNext() else tc.skipToPrevious()
+        } else {
+            seekTo(0)
+        }
+        buzz()
+        // A small nudge in the swipe direction.
+        springScale.target = 0.94f
+        kick()
+        handler.postDelayed({ springScale.target = 1f; kick() }, 90)
     }
 
     /** Drag along the progress dots to scrub; the seek is sent when the finger lifts. */
@@ -996,7 +1245,9 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             Mode.MEDIA_EXPANDED -> mediaExpanded = false
             Mode.MEDIA -> mediaDismissed = media
             Mode.CALL -> callDismissed = call?.key
-            Mode.NOTICE, Mode.CHARGING, Mode.RINGER -> { endTransient(); return }
+            Mode.LIVE -> currentLive()?.let { liveDismissed += it.key }
+            Mode.NOTICE, Mode.CHARGING, Mode.RINGER, Mode.UNLOCK, Mode.BUDS -> { endTransient(); return }
+            Mode.TOGGLES -> { closeToggles(); return }
             Mode.IDLE -> Unit
         }
         resolve()

@@ -7,7 +7,9 @@ design language: black, white, one red, and dots everywhere.
 |---|---|
 | ![Media, compact](docs/screens/media-compact.png) | ![Charging](docs/screens/charging.png) |
 | ![Notification](docs/screens/notification.png) | ![Silent](docs/screens/silent.png) |
-| ![Call](docs/screens/call.png) | |
+| ![Call](docs/screens/call.png) | ![Timer](docs/screens/timer.png) |
+| ![Navigation](docs/screens/nav.png) | ![Download](docs/screens/download.png) |
+| ![Earbuds](docs/screens/earbuds.png) | ![Quick toggles](docs/screens/toggles.png) |
 
 | ![Now playing, dot art](docs/screens/media-expanded.png) | ![Now playing, cover art](docs/screens/media-expanded-cover.png) |
 |---|---|
@@ -29,10 +31,20 @@ design language: black, white, one red, and dots everywhere.
   message. Tap to open the notification, or swipe up to dismiss it.
 - **Calls.** During a phone, WhatsApp, Instagram or other call, the island shows a breathing red
   dot and a live call timer. Tap it to return to the call, or swipe up to hide it.
+- **Live activities.** Clock-app timers and stopwatches count down beside the camera; Google Maps (and
+  other navigation apps) show the next turn and distance; downloads, uploads and updates show a
+  filling ring of dots with the percentage.
+- **Unlock.** A dot padlock opens and a tick lands when you unlock the phone.
+- **Earbuds.** When Bluetooth headphones connect, the island shows their battery (needs the optional
+  Nearby devices permission).
+- **Quick toggles.** Long-press the island for torch, ring / vibrate / silent, rotation lock and
+  settings.
+- **Per-app control.** *Apps that can pop up* lets you turn island notifications off app by app.
+- **Accent colour.** Swap the Nothing red for orange, yellow, green, blue, purple, pink or white.
 - **Charging and low battery.** A five-dot gauge and the percentage in Doto. It turns red at 20%.
 - **Ring / vibrate / silent.** A short confirmation whenever the ringer mode changes.
-- **Gestures.** Tap to expand or open, swipe up to dismiss, swipe down to expand, long-press the
-  empty pill to open settings. Tapping outside an expanded island collapses it.
+- **Gestures.** Tap to expand or open, swipe up to dismiss, swipe down to expand, swipe music left or
+  right to skip, long-press for quick toggles. Tapping outside an expanded island collapses it.
 - **Motion.** Spring-driven morphing between shapes, a press-to-squish response, and cross-faded
   content.
 

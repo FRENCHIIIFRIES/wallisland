@@ -30,6 +30,43 @@ data class CallInfo(
     val intent: PendingIntent?,
 )
 
+/** An ongoing "live activity" read from a notification: a timer, turn-by-turn navigation, or progress. */
+data class LiveInfo(
+    val key: String,
+    val kind: Kind,
+    val pkg: String,
+    val appName: String,
+    /** Headline: the distance for navigation, otherwise the notification title. */
+    val title: String,
+    val text: String,
+    /** Navigation's manoeuvre arrow, from the notification's large icon. */
+    val icon: Bitmap?,
+    /** Chronometer base (wall clock) when the app runs a live timer; 0 when it doesn't. */
+    val chronoBase: Long,
+    val countDown: Boolean,
+    /** A time read out of the notification text ("4:32") when there's no live chronometer. */
+    val staticTime: String?,
+    val progress: Int,
+    val progressMax: Int,
+    val indeterminate: Boolean,
+    val postedAt: Long,
+    val intent: PendingIntent?,
+) {
+    enum class Kind { NAV, TIMER, PROGRESS }
+
+    /** The time to show for a timer or stopwatch, if any. */
+    fun timeText(now: Long = System.currentTimeMillis()): String? {
+        if (chronoBase > 0) {
+            val ms = if (countDown) chronoBase - now else now - chronoBase
+            val s = (ms / 1000).coerceAtLeast(0)
+            return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s / 60 % 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
+        }
+        return staticTime
+    }
+
+    val percent: Int get() = if (progressMax > 0) (progress * 100 / progressMax).coerceIn(0, 100) else 0
+}
+
 /** Whatever is currently playing. */
 data class MediaInfo(
     val pkg: String,
@@ -67,6 +104,7 @@ object IslandHub {
         fun onNoticeRemoved(key: String)
         fun onMedia(media: MediaInfo?)
         fun onCall(call: CallInfo?)
+        fun onLive(live: List<LiveInfo>)
     }
 
     var listener: Listener? = null
@@ -74,7 +112,21 @@ object IslandHub {
             field = value
             value?.onMedia(media)
             value?.onCall(call)
+            value?.onLive(live.values.toList())
         }
+
+    private val live = LinkedHashMap<String, LiveInfo>()
+
+    fun putLive(info: LiveInfo) {
+        live[info.key] = info
+        listener?.onLive(live.values.toList())
+    }
+
+    fun removeLive(key: String) {
+        if (live.remove(key) != null) listener?.onLive(live.values.toList())
+    }
+
+    fun currentLive(): List<LiveInfo> = live.values.toList()
 
     var media: MediaInfo? = null
         private set

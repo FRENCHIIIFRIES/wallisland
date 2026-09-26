@@ -49,7 +49,9 @@ class IslandNotificationListener : NotificationListenerService() {
         val me = ComponentName(this, IslandNotificationListener::class.java)
         // Pick up a call that was already going when we (re)connected.
         try {
-            activeNotifications?.firstOrNull { isCall(it) }?.let { IslandHub.postCall(toCall(it)) }
+            val active = activeNotifications.orEmpty()
+            active.firstOrNull { isCall(it) }?.let { IslandHub.postCall(toCall(it)) }
+            for (sbn in active) toLive(sbn)?.let { IslandHub.putLive(it) }
         } catch (_: Exception) {
         }
         try {
@@ -78,6 +80,12 @@ class IslandNotificationListener : NotificationListenerService() {
             IslandHub.postCall(toCall(sbn))
             return
         }
+        val live = toLive(sbn)
+        if (live != null) {
+            IslandHub.putLive(live)
+            return
+        }
+        IslandHub.removeLive(sbn.key)
         val notice = toNotice(sbn, rankingMap) ?: return
         IslandHub.postNotice(notice)
     }
@@ -85,12 +93,14 @@ class IslandNotificationListener : NotificationListenerService() {
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
         seen.remove(sbn.key)
         if (IslandHub.call?.key == sbn.key) IslandHub.postCall(null)
+        IslandHub.removeLive(sbn.key)
         IslandHub.removeNotice(sbn.key)
     }
 
     private fun toNotice(sbn: StatusBarNotification, rankingMap: RankingMap?): Notice? {
         val n = sbn.notification ?: return null
         if (sbn.packageName == packageName) return null
+        if (sbn.packageName in prefs.blockedApps) return null
         if (sbn.isOngoing || n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return null
         if (n.flags and Notification.FLAG_FOREGROUND_SERVICE != 0) return null
         val extras = n.extras ?: return null
@@ -141,6 +151,63 @@ class IslandNotificationListener : NotificationListenerService() {
             avatar = avatar,
             intent = n.contentIntent,
             autoCancel = n.flags and Notification.FLAG_AUTO_CANCEL != 0,
+        )
+    }
+
+    private val prefs by lazy { Prefs(this) }
+
+    /**
+     * Ongoing notifications that deserve a live activity: navigation (Maps, Waze…), timers and
+     * stopwatches (clock apps), and anything showing a progress bar (downloads, uploads, updates).
+     */
+    private fun toLive(sbn: StatusBarNotification): LiveInfo? {
+        val n = sbn.notification ?: return null
+        val pkg = sbn.packageName
+        if (pkg == packageName || !sbn.isOngoing) return null
+        val ex = n.extras ?: return null
+        if (ex.getString(Notification.EXTRA_TEMPLATE)?.contains("MediaStyle") == true) return null
+        if (n.category == Notification.CATEGORY_CALL) return null
+
+        val title = ex.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim().orEmpty()
+        val text = (ex.getCharSequence(Notification.EXTRA_TEXT) ?: ex.getCharSequence(Notification.EXTRA_SUB_TEXT))
+            ?.toString()?.trim().orEmpty()
+        val chrono = ex.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER)
+        val progressMax = ex.getInt(Notification.EXTRA_PROGRESS_MAX, 0)
+        val indeterminate = ex.getBoolean(Notification.EXTRA_PROGRESS_INDETERMINATE)
+        val lower = pkg.lowercase()
+
+        val kind = when {
+            n.category == "navigation" || pkg in NAV_APPS -> LiveInfo.Kind.NAV
+            n.category == "stopwatch" || ((lower.contains("clock") || lower.contains("timer")) &&
+                (chrono || TIME.containsMatchIn(title) || TIME.containsMatchIn(text))) -> LiveInfo.Kind.TIMER
+            progressMax > 0 || indeterminate -> LiveInfo.Kind.PROGRESS
+            else -> return null
+        }
+        val icon = if (kind == LiveInfo.Kind.NAV) {
+            try {
+                n.getLargeIcon()?.let { iconToBitmap(it) }
+            } catch (_: Exception) {
+                null
+            }
+        } else {
+            null
+        }
+        return LiveInfo(
+            key = sbn.key,
+            kind = kind,
+            pkg = pkg,
+            appName = appLabel(this, pkg),
+            title = title,
+            text = text,
+            icon = icon,
+            chronoBase = if (chrono) n.`when` else 0L,
+            countDown = ex.getBoolean(Notification.EXTRA_CHRONOMETER_COUNT_DOWN),
+            staticTime = TIME.find(title)?.value ?: TIME.find(text)?.value,
+            progress = ex.getInt(Notification.EXTRA_PROGRESS, 0),
+            progressMax = progressMax,
+            indeterminate = indeterminate,
+            postedAt = sbn.postTime,
+            intent = n.contentIntent,
         )
     }
 
@@ -258,6 +325,14 @@ class IslandNotificationListener : NotificationListenerService() {
             ?.takeIf { it.isNotBlank() }
 
     companion object {
+        private val NAV_APPS = setOf(
+            "com.google.android.apps.maps", "com.waze", "com.here.app.maps", "net.osmand", "net.osmand.plus",
+            "com.sygic.aura", "ru.yandex.yandexnavi",
+        )
+
+        /** "4:32", "12:05", "1:02:33". */
+        private val TIME = Regex("""\b\d{1,2}:\d{2}(:\d{2})?\b""")
+
         fun isEnabled(ctx: Context): Boolean {
             val flat = Settings.Secure.getString(ctx.contentResolver, "enabled_notification_listeners") ?: return false
             val me = ComponentName(ctx, IslandNotificationListener::class.java)

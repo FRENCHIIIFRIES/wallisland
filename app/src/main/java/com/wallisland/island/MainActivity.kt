@@ -38,6 +38,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
+        Look.accent = prefs.accent
         if (Build.VERSION.SDK_INT >= 28) {
             // Lets this window's insets report the camera cut-out so we can measure it.
             window.attributes = window.attributes.apply {
@@ -71,6 +72,11 @@ class MainActivity : Activity() {
         super.onAttachedToWindow()
         // Insets are dispatched on the first layout pass, just after attach.
         window.decorView.post { measureCamera() }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        refresh()
     }
 
     override fun onResume() {
@@ -165,6 +171,13 @@ class MainActivity : Activity() {
                 granted = { checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED },
             ) { requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1) })
         }
+        if (Build.VERSION.SDK_INT >= 31) {
+            card.addView(divider())
+            card.addView(permissionRow(
+                "Nearby devices", "Optional. Lets the island show your earbuds' battery when they connect.",
+                granted = { checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED },
+            ) { requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), 2) })
+        }
         col.addView(card)
     }
 
@@ -185,7 +198,22 @@ class MainActivity : Activity() {
         row.addView(demo("Call", IslandService.ACTION_DEMO_CALL),
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         col.addView(row)
-        col.addView(hint("Tap music in the island to expand it. Swipe up to dismiss, long-press the empty pill for settings."))
+        val row2 = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(8), 0, 0)
+        }
+        fun small(label: String, action: String) = demo(label, action).apply { setPadding(dp(4), dp(10), dp(4), dp(10)) }
+        row2.addView(small("Timer", IslandService.ACTION_DEMO_TIMER), lp())
+        row2.addView(small("Maps", IslandService.ACTION_DEMO_NAV), lp())
+        row2.addView(small("Files", IslandService.ACTION_DEMO_PROGRESS), lp())
+        row2.addView(small("Unlock", IslandService.ACTION_DEMO_UNLOCK), lp())
+        row2.addView(small("Buds", IslandService.ACTION_DEMO_BUDS),
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        col.addView(row2)
+        col.addView(hint(
+            "Tap music to open the player; swipe it left or right to skip. Long-press the island for quick " +
+                "toggles (torch, sound, rotation). Swipe up to dismiss."
+        ))
     }
 
     private fun buildShow(col: LinearLayout) {
@@ -199,13 +227,82 @@ class MainActivity : Activity() {
         card.addView(divider())
         card.addView(toggleRow("Ring / vibrate / silent", null, prefs.showRinger) { prefs.showRinger = it })
         card.addView(divider())
+        card.addView(toggleRow("Live activities", "Timers, Maps directions and downloads", prefs.showLive) { prefs.showLive = it })
+        card.addView(divider())
+        card.addView(toggleRow("Unlock animation", "A dot padlock opens when you unlock", prefs.showUnlock) { prefs.showUnlock = it })
+        card.addView(divider())
+        card.addView(toggleRow("Earbuds", "Battery when Bluetooth headphones connect", prefs.showBuds) { prefs.showBuds = it })
+        card.addView(divider())
         card.addView(toggleRow("Idle pill", "Keep a small pill around the camera when nothing's happening", prefs.showIdle) { prefs.showIdle = it })
+        card.addView(divider())
+        card.addView(linkRow("Apps that can pop up", "Choose which apps' notifications open the island") {
+            startActivity(Intent(this, AppsActivity::class.java))
+        })
         col.addView(card)
+    }
+
+    /** A tappable row with a chevron, for opening another screen. */
+    private fun linkRow(title: String, sub: String, onClick: () -> Unit): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(20), dp(16), dp(20), dp(16))
+            isClickable = true
+            setOnClickListener { onClick() }
+        }
+        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, dp(16), 0) }
+        texts.addView(titleView(title))
+        texts.addView(subView(sub))
+        row.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(TextView(this).apply {
+            text = "›"
+            textSize = 22f
+            setTextColor(Look.GREY)
+        })
+        return row
+    }
+
+    /** Accent colour: a row of dot swatches; the chosen one gets a ring. */
+    private fun accentRow(): View {
+        val wrap = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(16), dp(20), dp(16))
+        }
+        wrap.addView(titleView("Accent colour"))
+        val swatches = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(12), 0, 0)
+        }
+        for ((name, color) in Look.ACCENTS) {
+            val chosen = prefs.accent == color
+            swatches.addView(View(this).apply {
+                contentDescription = name
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.OVAL
+                    setColor(color)
+                    if (chosen) setStroke(dp(3), Look.BLACK)
+                }
+                foreground = if (chosen) android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.OVAL
+                    setStroke(dp(2), Look.WHITE)
+                } else null
+                setOnClickListener {
+                    prefs.accent = color
+                    Look.accent = color
+                    preview()
+                    recreate()
+                }
+            }, LinearLayout.LayoutParams(0, dp(30), 1f).apply { marginEnd = dp(8) })
+        }
+        wrap.addView(swatches)
+        return wrap
     }
 
     private fun buildBehaviour(col: LinearLayout) {
         col.addView(sectionLabel("BEHAVIOUR"))
         val card = card()
+        card.addView(accentRow())
+        card.addView(divider())
         card.addView(toggleRow("Dot art", "Render album art and avatars as halftone dots", prefs.dotArt) { prefs.dotArt = it })
         card.addView(divider())
         card.addView(toggleRow("Colour dots", "Dot art and the equaliser take their colours from the album cover", prefs.dotColor) { prefs.dotColor = it })
@@ -372,7 +469,7 @@ class MainActivity : Activity() {
             prefs.enabled -> "ON"
             else -> "OFF"
         }
-        statusText.setTextColor(if (!overlay) Look.RED else Look.WHITE)
+        statusText.setTextColor(if (!overlay) Look.accent else Look.WHITE)
         statusDetail.text = when {
             !overlay -> "Allow \"Show above status bar\" or \"Draw over apps\" below."
             !prefs.enabled -> "Turn it on with the switch."
@@ -384,7 +481,7 @@ class MainActivity : Activity() {
         masterToggle.set(prefs.enabled)
         for (row in permissionRows) {
             val ok = row.granted()
-            (row.dot.background as GradientDrawable).setColor(if (ok) Look.WHITE else Look.RED)
+            (row.dot.background as GradientDrawable).setColor(if (ok) Look.WHITE else Look.accent)
             row.action.visibility = if (ok) View.GONE else View.VISIBLE
         }
     }
@@ -489,7 +586,7 @@ class MainActivity : Activity() {
         gravity = Gravity.CENTER_VERTICAL
         setPadding(dp(6), dp(30), 0, dp(12))
         addView(View(context).apply {
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Look.RED) }
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Look.accent) }
         }, LinearLayout.LayoutParams(dp(6), dp(6)).apply { marginEnd = dp(10) })
         addView(label(text))
     }
@@ -584,7 +681,7 @@ class MainActivity : Activity() {
             setPadding(dp(20), dp(16), dp(16), dp(16))
         }
         val dot = View(this).apply {
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Look.RED) }
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Look.accent) }
         }
         row.addView(dot, LinearLayout.LayoutParams(dp(8), dp(8)).apply { marginEnd = dp(14) })
         val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, dp(12), 0) }

@@ -30,6 +30,17 @@ class Prefs(context: Context) {
     var dotColor by bool("dot_color", true)
     var autoAlign by bool("auto_align", true)
     var hideWhileCapturing by bool("hide_capturing", true)
+    var showLive by bool("show_live", true)
+    var showUnlock by bool("show_unlock", true)
+    var showBuds by bool("show_buds", true)
+
+    /** Accent colour (ARGB). */
+    var accent by int("accent", Look.RED)
+
+    /** Packages whose notifications never open the island. */
+    var blockedApps: Set<String>
+        get() = sp.getStringSet("blocked_apps", emptySet()) ?: emptySet()
+        set(value) = sp.edit().putStringSet("blocked_apps", HashSet(value)).apply()
 
     /** Background opacity of the island, in percent. */
     var opacity by int("opacity", DEFAULT_OPACITY)
