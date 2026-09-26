@@ -40,8 +40,9 @@ design language: black, white, one red, and dots everywhere.
 
 ## Install
 
-Download the APK from the latest **Build APK** run under *Actions* (artifact `wallisland-apk`), or
-build it yourself:
+On your phone, download
+**[Wallisland.apk](https://github.com/FRENCHIIIFRIES/wallisland/releases/latest/download/Wallisland.apk)**
+(always the newest build) and open it to install. Or build it yourself:
 
 ```sh
 ./gradlew assembleRelease   # app/build/outputs/apk/release/app-release.apk
