@@ -136,6 +136,15 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
     private val hitNext = RectF()
     private val hitBar = RectF()
     private val hitOpen = RectF()
+    private val hitArt = RectF()
+    private val hitRewind = RectF()
+    private val hitForward = RectF()
+    private var barLeft = 0f
+    private var barRight = 0f
+    private var scrubbing = false
+    private var scrubFrac = 0f
+    private var seekHoldPos = 0L
+    private var seekHoldUntil = 0L
 
     private fun textPaint(face: android.graphics.Typeface, sizeSp: Float, color: Int) =
         TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -167,6 +176,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
     fun setMedia(info: MediaInfo?) {
         val old = media
         media = info
+        if (info != null && old != null && info.positionAt != old.positionAt) seekHoldUntil = 0L
         if (info == null) {
             mediaArt = null; mediaArtSmall = null; mediaPicture = null
             mediaExpanded = false
@@ -274,7 +284,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             Mode.IDLE -> idleW to idleH
             Mode.MEDIA, Mode.CHARGING, Mode.RINGER -> idleW + 2 * context.dp(SIDE_DP) to idleH
             Mode.NOTICE -> bigW to idleH + context.dp(66f)
-            Mode.MEDIA_EXPANDED -> bigW to idleH + context.dp(152f)
+            Mode.MEDIA_EXPANDED -> bigW to idleH + context.dp(172f)
         }
         val previewing = SystemClock.uptimeMillis() < previewUntil
         val visible = !hidden && prefs.enabled && (screenOn || previewing) &&
@@ -543,34 +553,40 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         drawHeader(canvas, m.appName, null, alpha, redDot = m.playing)
         drawVisualizer(canvas, pillRect.right - context.dp(22f), pillRect.top + topZone / 2f, context.dp(3.4f), 5, 4, m.playing, alpha)
 
+        // Artwork: tap to flip between the real cover and the dot-matrix version.
         val pad = context.dp(18f)
-        val s = context.dp(64f)
-        val top = pillRect.top + topZone + context.dp(6f)
+        val s = context.dp(ART_DP)
+        val top = pillRect.top + topZone + context.dp(4f)
         box.set(pillRect.left + pad, top, pillRect.left + pad + s, top + s)
         drawArt(canvas, box, small = false, alpha = alpha)
-        hitOpen.set(box.left, box.top, pillRect.right - pad, box.bottom)
+        hitArt.set(box)
 
         val tx = box.right + context.dp(14f)
         val avail = pillRect.right - pad - tx
         titlePaint.alpha = alpha
         bodyPaint.alpha = alpha
-        drawText(canvas, m.title, tx, top + context.dp(26f), avail, titlePaint)
-        drawText(canvas, m.artist, tx, top + context.dp(46f), avail, bodyPaint)
+        drawText(canvas, m.title, tx, top + s / 2f - context.dp(3f), avail, titlePaint)
+        drawText(canvas, m.artist, tx, top + s / 2f + context.dp(17f), avail, bodyPaint)
+        hitOpen.set(tx, box.top, pillRect.right - pad, box.bottom)
 
-        // Progress: a row of dots, played in white, the playhead in red.
+        // Progress: a row of dots, played in white, the playhead in red. Drag it to scrub.
         val barY = box.bottom + context.dp(22f)
         labelPaint.alpha = alpha
         val dur = m.durationMs
-        val pos = m.currentPosition()
+        val pos = shownPosition(m)
         val barL: Float
         val barR: Float
         if (dur > 0) {
             val lt = fmt(pos)
             val rt = "-" + fmt(dur - pos)
             val tw = labelPaint.measureText("-00:00")
+            labelPaint.color = if (scrubbing) Look.WHITE else Look.GREY
+            labelPaint.alpha = alpha
             drawText(canvas, lt, pillRect.left + pad, barY, tw, labelPaint, centerY = true)
             val rw = labelPaint.measureText(rt)
             drawText(canvas, rt, pillRect.right - pad - rw, barY, rw + 1f, labelPaint, centerY = true)
+            labelPaint.color = Look.GREY
+            labelPaint.alpha = alpha
             barL = pillRect.left + pad + tw + context.dp(8f)
             barR = pillRect.right - pad - tw - context.dp(8f)
         } else {
@@ -591,26 +607,51 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
                 else -> Look.DOT_OFF
             }
             dotPaint.alpha = alpha
-            canvas.drawCircle(x, barY, context.dp(if (isHead) 3.2f else 1.5f), dotPaint)
+            val r = when {
+                isHead && scrubbing -> 4.6f
+                isHead -> 3.2f
+                else -> 1.5f
+            }
+            canvas.drawCircle(x, barY, context.dp(r), dotPaint)
         }
-        hitBar.set(barL, barY - context.dp(14f), barR, barY + context.dp(14f))
+        // Generous touch target so the bar is easy to grab.
+        hitBar.set(barL - context.dp(8f), barY - context.dp(16f), barR + context.dp(8f), barY + context.dp(16f))
+        barLeft = barL
+        barRight = barR
 
-        // Transport: dot-matrix glyphs.
+        // Transport, all dot-matrix: -10s, previous, play/pause, next, +10s.
         val cy = barY + context.dp(34f)
         val cx = pillRect.centerX()
-        val gap = context.dp(76f)
+        val gap = min(pillRect.width() / 5.4f, context.dp(70f))
         glyphPaint.color = Look.WHITE
         glyphPaint.alpha = alpha
-        val gs = context.dp(17f)
+        val gs = context.dp(16f)
+        val ss = context.dp(13f)
         val ps = context.dp(22f)
-        Glyph.PREV.draw(canvas, cx - gap - Glyph.PREV.width(gs) / 2f, cy, gs, glyphPaint)
-        val play = if (m.playing) Glyph.PAUSE else Glyph.PLAY
-        play.draw(canvas, cx - play.width(ps) / 2f, cy, ps, glyphPaint)
-        Glyph.NEXT.draw(canvas, cx + gap - Glyph.NEXT.width(gs) / 2f, cy, gs, glyphPaint)
-        val hs = context.dp(26f)
+        fun glyph(g: Glyph, x: Float, size: Float) = g.draw(canvas, x - g.width(size) / 2f, cy, size, glyphPaint)
+        glyph(Glyph.REWIND, cx - 2 * gap, ss)
+        glyph(Glyph.PREV, cx - gap, gs)
+        glyph(if (m.playing) Glyph.PAUSE else Glyph.PLAY, cx, ps)
+        glyph(Glyph.NEXT, cx + gap, gs)
+        glyph(Glyph.FORWARD, cx + 2 * gap, ss)
+        labelPaint.alpha = alpha
+        val tenW = labelPaint.measureText("10")
+        drawText(canvas, "10", cx - 2 * gap - tenW / 2f, cy + context.dp(17f), tenW + 1f, labelPaint, centerY = true)
+        drawText(canvas, "10", cx + 2 * gap - tenW / 2f, cy + context.dp(17f), tenW + 1f, labelPaint, centerY = true)
+
+        val hs = min(gap / 2f, context.dp(26f))
+        hitRewind.set(cx - 2 * gap - hs, cy - hs, cx - 2 * gap + hs, cy + hs)
         hitPrev.set(cx - gap - hs, cy - hs, cx - gap + hs, cy + hs)
         hitPlay.set(cx - hs, cy - hs, cx + hs, cy + hs)
         hitNext.set(cx + gap - hs, cy - hs, cx + gap + hs, cy + hs)
+        hitForward.set(cx + 2 * gap - hs, cy - hs, cx + 2 * gap + hs, cy + hs)
+    }
+
+    /** What the playhead should show: the finger while scrubbing, the requested spot right after a seek. */
+    private fun shownPosition(m: MediaInfo): Long {
+        if (scrubbing && m.durationMs > 0) return (scrubFrac * m.durationMs).toLong()
+        if (SystemClock.uptimeMillis() < seekHoldUntil) return seekHoldPos
+        return m.currentPosition()
     }
 
     private fun drawCharging(canvas: Canvas, c: Transient.ChargeT, alpha: Int) {
@@ -724,6 +765,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         }
         if (springAlpha.target == 0f) return false
         if (event.actionMasked == MotionEvent.ACTION_DOWN && !pillRect.contains(event.x, event.y)) return false
+        if (scrubTouch(event)) return true
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> setPressed(true)
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> setPressed(false)
@@ -757,17 +799,90 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         }
     }
 
+    /** Drag along the progress dots to scrub; the seek is sent when the finger lifts. */
+    private fun scrubTouch(e: MotionEvent): Boolean {
+        val m = media
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                if (shownMode != Mode.MEDIA_EXPANDED || m == null || m.durationMs <= 0) return false
+                if (!hitBar.contains(e.x, e.y)) return false
+                scrubbing = true
+                parent?.requestDisallowInterceptTouchEvent(true)
+                updateScrub(e.x)
+                buzz()
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (!scrubbing) return false
+                updateScrub(e.x)
+                return true
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (!scrubbing) return false
+                scrubbing = false
+                if (e.actionMasked == MotionEvent.ACTION_UP && m != null) seekTo((scrubFrac * m.durationMs).toLong())
+                invalidate()
+                return true
+            }
+        }
+        return scrubbing
+    }
+
+    private fun updateScrub(x: Float) {
+        val w = (barRight - barLeft).coerceAtLeast(1f)
+        val f = ((x - barLeft) / w).coerceIn(0f, 1f)
+        // A light tick every ~5% so scrubbing feels like a dial.
+        if ((f * 20).toInt() != (scrubFrac * 20).toInt()) buzz()
+        scrubFrac = f
+        invalidate()
+    }
+
+    private fun seekTo(ms: Long) {
+        val m = media ?: return
+        val target = if (m.durationMs > 0) ms.coerceIn(0, m.durationMs) else ms.coerceAtLeast(0)
+        seekHoldPos = target
+        seekHoldUntil = SystemClock.uptimeMillis() + 1500
+        val c = m.controller
+        if (c != null) {
+            c.transportControls.seekTo(target)
+        } else {
+            // Demo player (no real session): move the playhead ourselves.
+            media = m.copy(positionMs = target, positionAt = SystemClock.elapsedRealtime())
+            seekHoldUntil = 0L
+        }
+        invalidate()
+    }
+
     private fun tapExpandedMedia(x: Float, y: Float) {
         val m = media ?: return
-        val tc = m.controller?.transportControls ?: return
+        val tc = m.controller?.transportControls
         when {
-            hitPlay.contains(x, y) -> { if (m.playing) tc.pause() else tc.play(); buzz() }
-            hitPrev.contains(x, y) -> { tc.skipToPrevious(); buzz() }
-            hitNext.contains(x, y) -> { tc.skipToNext(); buzz() }
-            hitBar.contains(x, y) && m.durationMs > 0 -> {
-                val f = ((x - hitBar.left) / hitBar.width()).coerceIn(0f, 1f)
-                tc.seekTo((f * m.durationMs).toLong())
+            hitPlay.contains(x, y) -> {
+                if (tc != null) {
+                    if (m.playing) tc.pause() else tc.play()
+                } else {
+                    media = m.copy(playing = !m.playing, positionMs = m.currentPosition(), positionAt = SystemClock.elapsedRealtime())
+                    resolve()
+                }
                 buzz()
+            }
+            hitRewind.contains(x, y) -> { seekTo(shownPosition(m) - SKIP_MS); buzz() }
+            hitForward.contains(x, y) -> { seekTo(shownPosition(m) + SKIP_MS); buzz() }
+            hitPrev.contains(x, y) -> {
+                // Like most players: restart the song unless it only just started.
+                if (tc != null) tc.skipToPrevious() else seekTo(0)
+                buzz()
+            }
+            hitNext.contains(x, y) -> { if (tc != null) tc.skipToNext() else seekTo(0); buzz() }
+            hitBar.contains(x, y) && m.durationMs > 0 -> {
+                val f = ((x - barLeft) / (barRight - barLeft).coerceAtLeast(1f)).coerceIn(0f, 1f)
+                seekTo((f * m.durationMs).toLong())
+                buzz()
+            }
+            hitArt.contains(x, y) -> {
+                prefs.dotArt = !prefs.dotArt
+                buzz()
+                invalidate()
             }
             hitOpen.contains(x, y) -> {
                 m.controller?.sessionActivity?.let { send(it) }
@@ -819,8 +934,10 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
     }
 
     companion object {
+        private const val SKIP_MS = 10_000L
         private const val ELLIPSIS = "\u2026"
         private const val SIDE_DP = 62f
+        private const val ART_DP = 76f
         private const val PAUSE_LINGER_MS = 60_000L
         private const val FADE_OUT_MS = 90f
         private const val FADE_IN_MS = 200f

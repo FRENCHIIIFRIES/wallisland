@@ -8,15 +8,19 @@ design language: black, white, one red, and dots everywhere.
 | ![Media, compact](docs/screens/media-compact.png) | ![Charging](docs/screens/charging.png) |
 | ![Notification](docs/screens/notification.png) | ![Silent](docs/screens/silent.png) |
 
-![Now playing, expanded](docs/screens/media-expanded.png)
+| ![Now playing, dot art](docs/screens/media-expanded.png) | ![Now playing, cover art](docs/screens/media-expanded-cover.png) |
+|---|---|
 
 <img src="docs/screens/settings.png" width="320" alt="Settings screen">
 
 ## What it does
 
 - **Now playing.** Halftone dot album art and a dot equaliser on either side of the camera. Tap to
-  expand into full controls: a dotted progress bar you can tap to seek, and dot-matrix
-  prev / play / next buttons.
+  expand into the full player:
+  - Drag along the dotted progress bar to scrub, or tap to jump.
+  - Back 10 s, previous, play / pause, next and forward 10 s, all as dot-matrix buttons.
+  - Tap the album art to switch between the real cover and the dot-matrix version.
+  - Tap the song title to open the music app.
 - **Notifications.** Only alerts that would make a sound open the island. Chats show the latest
   message. Tap to open the notification, or swipe up to dismiss it.
 - **Charging and low battery.** A five-dot gauge and the percentage in Doto. It turns red at 20%.
@@ -35,8 +39,9 @@ design language: black, white, one red, and dots everywhere.
 - A one-tap request for unrestricted battery use in settings.
 - A Quick Settings tile to switch it on and off.
 - It hides for full-screen video and games, and in landscape. Both can be turned off.
-- It centres on the front-camera cut-out automatically, and you can fine-tune the size and position
-  with live preview.
+- It centres on the front-camera cut-out automatically. Settings shows exactly where it found the
+  camera, and **Fit to camera** sizes the pill around it. You can fine-tune everything with live
+  preview.
 
 ## Install
 
