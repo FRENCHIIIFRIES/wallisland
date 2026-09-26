@@ -15,6 +15,7 @@ import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.graphics.PixelFormat
 import android.graphics.Rect
+import android.hardware.display.DisplayManager
 import android.media.AudioManager
 import android.os.BatteryManager
 import android.os.Build
@@ -23,6 +24,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
+import android.view.Display
 import android.view.Gravity
 import android.view.View
 import android.view.WindowInsets
@@ -37,6 +39,9 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
 
     private lateinit var prefs: Prefs
     private lateinit var wm: WindowManager
+
+    /** A window context, so window metrics and cut-out insets describe the real display. */
+    private lateinit var windowCtx: Context
     private val main = Handler(Looper.getMainLooper())
 
     private var island: IslandView? = null
@@ -54,7 +59,14 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
     override fun onCreate() {
         super.onCreate()
         prefs = Prefs(this)
-        wm = getSystemService(WindowManager::class.java)
+        windowCtx = if (Build.VERSION.SDK_INT >= 30) {
+            val display = getSystemService(DisplayManager::class.java).getDisplay(Display.DEFAULT_DISPLAY)
+            createDisplayContext(display)
+                .createWindowContext(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, null)
+        } else {
+            this
+        }
+        wm = windowCtx.getSystemService(WindowManager::class.java)
         goForeground()
         if (!Settings.canDrawOverlays(this) || !prefs.enabled) {
             stopSelf()
@@ -170,7 +182,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
             title = "Island"
         }
         islandParams = params
-        val view = IslandView(this, prefs, this)
+        val view = IslandView(windowCtx, prefs, this)
         island = view
         position()
         try {
@@ -188,7 +200,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
      * out of the way of full-screen video and games.
      */
     private fun attachTracker() {
-        val v = View(this)
+        val v = View(windowCtx)
         val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
@@ -237,31 +249,35 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
     private fun position() {
         val params = islandParams ?: return
         val screenW: Int
-        var cutout: Rect? = null
+        var camera: Rect? = null
         if (Build.VERSION.SDK_INT >= 30) {
             val metrics = wm.currentWindowMetrics
             screenW = metrics.bounds.width()
-            cutout = metrics.windowInsets.displayCutout?.boundingRectTop?.takeIf { !it.isEmpty }
+            camera = Camera.fromInsets(metrics.windowInsets, screenW)
         } else {
-            screenW = resources.displayMetrics.widthPixels
+            screenW = windowCtx.resources.displayMetrics.widthPixels
             if (Build.VERSION.SDK_INT >= 29) {
                 @Suppress("DEPRECATION")
-                cutout = wm.defaultDisplay.cutout?.boundingRectTop?.takeIf { !it.isEmpty }
+                camera = Camera.fromCutout(wm.defaultDisplay.cutout, screenW)
             }
         }
         val idleH = dp(prefs.height)
+        var cx: Int? = camera?.centerX()
+        var cy: Int? = camera?.centerY()
+        if (cx == null && prefs.cameraScreenW == screenW && prefs.cameraX >= 0) {
+            // Fall back to what the settings screen measured on this same display.
+            cx = prefs.cameraX
+            cy = prefs.cameraY
+        }
         var x = 0
-        var y: Int
-        // Only snap to cutouts that are a small, roughly central camera hole, not a full-width notch.
-        val c = cutout
-        if (prefs.autoAlign && c != null && c.width() < screenW / 2) {
-            x = c.centerX() - screenW / 2
-            y = c.centerY() - idleH / 2
-        } else {
-            y = ((statusBarHeight() - idleH) / 2).coerceAtLeast(dp(4))
+        var y = ((statusBarHeight() - idleH) / 2).coerceAtLeast(dp(4))
+        if (prefs.autoAlign && cx != null && cy != null) {
+            // Gravity is centre-horizontal, so x is an offset from the middle of the display.
+            x = cx - screenW / 2
+            y = cy - idleH / 2
         }
         x += dp(prefs.offsetX)
-        y += dp(prefs.offsetY)
+        y = (y + dp(prefs.offsetY)).coerceAtLeast(0)
         params.x = x
         params.y = y
         island?.let { if (it.isAttachedToWindow) wm.updateViewLayout(it, params) }

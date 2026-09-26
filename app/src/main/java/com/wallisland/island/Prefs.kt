@@ -29,6 +29,14 @@ class Prefs(context: Context) {
     var offsetX by int("offset_x", 0)
     var offsetY by int("offset_y", 0)
 
+    /**
+     * The front camera as measured by the settings screen, in px of a display [cameraScreenW] wide.
+     * A fallback for when the service can't read the cut-out itself.
+     */
+    var cameraX by int("camera_x", -1)
+    var cameraY by int("camera_y", -1)
+    var cameraScreenW by int("camera_screen_w", -1)
+
     /** How long a notification stays open, in seconds. */
     var noticeSeconds by int("notice_seconds", 4)
 

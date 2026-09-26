@@ -16,10 +16,12 @@ import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import kotlin.math.roundToInt
 
 /** Settings, built in code so every pixel follows the dot-matrix look. */
 class MainActivity : Activity() {
@@ -27,6 +29,7 @@ class MainActivity : Activity() {
     private lateinit var prefs: Prefs
     private lateinit var statusText: TextView
     private lateinit var masterToggle: NToggle
+    private var cameraText: TextView? = null
     private val permissionRows = mutableListOf<PermissionRow>()
 
     private class PermissionRow(val granted: () -> Boolean, val dot: View, val action: TextView)
@@ -34,6 +37,12 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
+        if (Build.VERSION.SDK_INT >= 28) {
+            // Lets this window's insets report the camera cut-out so we can measure it.
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
 
         val scroll = ScrollView(this).apply {
             background = DotGridDrawable(dp(18f), dp(1f))
@@ -54,6 +63,12 @@ class MainActivity : Activity() {
         buildBehaviour(col)
         buildSize(col)
         buildFooter(col)
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        // Insets are dispatched on the first layout pass, just after attach.
+        window.decorView.post { measureCamera() }
     }
 
     override fun onResume() {
@@ -193,6 +208,15 @@ class MainActivity : Activity() {
         col.addView(sectionLabel("SIZE & POSITION"))
         val card = card()
         card.addView(toggleRow("Snap to camera", "Centre on the front camera cut-out", prefs.autoAlign) { prefs.autoAlign = it; preview() })
+        val camRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(20), 0, dp(20), dp(16))
+        }
+        cameraText = subView("Looking for the camera…")
+        camRow.addView(cameraText, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(12) })
+        camRow.addView(pillButton(this, "Fit to camera") { fitToCamera() })
+        card.addView(camRow)
         card.addView(divider())
         card.addView(sliderRow("Width", 60, 220, prefs.width, "dp") { prefs.width = it })
         card.addView(sliderRow("Height", 22, 48, prefs.height, "dp") { prefs.height = it })
@@ -240,6 +264,50 @@ class MainActivity : Activity() {
     }
 
     private fun preview() = IslandService.start(this, IslandService.ACTION_PREVIEW)
+
+    /** The camera hole in this window, which spans the whole display in portrait. */
+    private var camera: android.graphics.Rect? = null
+
+    private fun measureCamera() {
+        val screenW = resources.displayMetrics.widthPixels
+        val cam = Camera.fromInsets(window.decorView.rootWindowInsets, screenW)
+        camera = cam
+        val d = resources.displayMetrics.density
+        fun px(v: Int) = (v / d).roundToInt()
+        cameraText?.text = if (cam == null) {
+            "No camera cut-out reported. Centre it with the sliders below."
+        } else {
+            prefs.cameraX = cam.centerX()
+            prefs.cameraY = cam.centerY()
+            prefs.cameraScreenW = screenW
+            val off = px(cam.centerX() - screenW / 2)
+            val side = when {
+                off == 0 -> "dead centre"
+                off < 0 -> "${-off}dp left of centre"
+                else -> "${off}dp right of centre"
+            }
+            "Camera: $side, ${px(cam.centerY())}dp from the top, ${px(cam.width())}dp wide. Screen ${px(screenW)}dp."
+        }
+    }
+
+    /** Sizes the idle pill to hug the camera with an even margin, and clears manual nudges. */
+    private fun fitToCamera() {
+        val cam = camera
+        if (cam == null) {
+            toast("No camera cut-out found on this screen")
+            return
+        }
+        val d = resources.displayMetrics.density
+        val hole = cam.height().coerceAtLeast(cam.width()) / d
+        val h = (hole + 18f).roundToInt().coerceIn(22, 48)
+        prefs.height = h
+        prefs.width = (h * 3.3f).roundToInt().coerceIn(60, 220)
+        prefs.offsetX = 0
+        prefs.offsetY = 0
+        prefs.autoAlign = true
+        preview()
+        recreate()
+    }
 
     private fun openListenerSettings() {
         if (Build.VERSION.SDK_INT >= 30) {

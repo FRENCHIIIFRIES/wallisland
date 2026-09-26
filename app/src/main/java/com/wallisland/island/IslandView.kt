@@ -377,7 +377,10 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         val settled = !springW.moving && !springH.moving
         val needW = (max(springW.target, if (settled) 0f else springW.value) * 1.08f + slack).roundToInt()
         val needH = (max(springH.target, if (settled) 0f else springH.value) * 1.08f + slack).roundToInt()
-        val w = if (settled) needW else max(needW, windowW)
+        // An overlay wider than the display gets shoved sideways by the window manager, which knocks the
+        // pill off-centre. Cap at the display width; the pill itself always leaves a margin.
+        val screenW = resources.displayMetrics.widthPixels
+        val w = min(if (settled) needW else max(needW, windowW), screenW)
         val h = if (settled) needH else max(needH, windowH)
         if (w != windowW || h != windowH) {
             windowW = w
