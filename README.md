@@ -73,6 +73,13 @@ Then open the app and allow the permissions it asks for:
 
 Use the **Try it** buttons in the app to preview each state.
 
+### Updating
+
+Open Wallisland and scroll to **Updates**. It checks this repo's latest release when the app opens;
+tap **Update** to download and install it in place. (The first time, Android asks you to allow
+Wallisland to install apps.) Every build from build 13 on is signed with the same key, so updates
+install over each other. If you're coming from build 12 or older, uninstall once and install fresh.
+
 Requires Android 8.0 (API 26) or newer.
 
 ## Fonts

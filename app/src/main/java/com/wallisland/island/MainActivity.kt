@@ -63,6 +63,7 @@ class MainActivity : Activity() {
         buildShow(col)
         buildBehaviour(col)
         buildSize(col)
+        buildUpdates(col)
         buildFooter(col)
     }
 
@@ -247,6 +248,100 @@ class MainActivity : Activity() {
             addView(reset, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         })
         col.addView(card)
+    }
+
+    private lateinit var updateText: TextView
+    private lateinit var updateButton: TextView
+    private var pendingRelease: Updater.Release? = null
+    private var updating = false
+
+    private fun buildUpdates(col: LinearLayout) {
+        col.addView(sectionLabel("UPDATES"))
+        val card = card()
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(20), dp(16), dp(16), dp(16))
+        }
+        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, dp(12), 0) }
+        texts.addView(titleView("Build ${Updater.currentBuild(this)}"))
+        updateText = subView("Checking for updates…")
+        texts.addView(updateText)
+        row.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        updateButton = pillButton(this, "Check") { onUpdateButton() }
+        row.addView(updateButton)
+        card.addView(row)
+        col.addView(card)
+        checkForUpdate()
+    }
+
+    private fun checkForUpdate() {
+        if (updating) return
+        updateText.text = "Checking for updates…"
+        Updater.check(this) { result ->
+            if (isFinishing || updating) return@check
+            when (result) {
+                is Updater.Check.Available -> {
+                    pendingRelease = result.release
+                    updateText.text = "Build ${result.release.build} is out."
+                    updateText.setTextColor(Look.WHITE)
+                    setUpdateButton("Update", filled = true)
+                }
+                Updater.Check.UpToDate -> {
+                    pendingRelease = null
+                    updateText.text = "You're on the latest build."
+                    updateText.setTextColor(Look.GREY)
+                    setUpdateButton("Check", filled = false)
+                }
+                is Updater.Check.Failed -> {
+                    pendingRelease = null
+                    updateText.text = "Couldn't check: ${result.reason}."
+                    updateText.setTextColor(Look.GREY)
+                    setUpdateButton("Retry", filled = false)
+                }
+            }
+        }
+    }
+
+    private fun onUpdateButton() {
+        val release = pendingRelease
+        if (release == null) {
+            checkForUpdate()
+            return
+        }
+        if (updating) return
+        if (!Updater.ensureCanInstall(this)) {
+            toast("Allow Wallisland to install updates, then tap Update again")
+            return
+        }
+        updating = true
+        updateButton.isEnabled = false
+        updateText.text = "Downloading…"
+        Updater.install(this, release,
+            progress = { pct ->
+                updateText.text = if (pct >= 0) "Downloading… $pct%" else "Downloading…"
+            },
+            committed = {
+                // The system now asks to confirm; if it's cancelled, the button works again.
+                updating = false
+                updateButton.isEnabled = true
+                updateText.text = "Build ${release.build} is ready. Confirm the install."
+            },
+            failed = { reason ->
+                updating = false
+                updateButton.isEnabled = true
+                updateText.text = "Update failed: $reason"
+            },
+        )
+    }
+
+    private fun setUpdateButton(label: String, filled: Boolean) {
+        val fresh = pillButton(this, label, filled) { onUpdateButton() }
+        val parent = updateButton.parent as ViewGroup
+        val idx = parent.indexOfChild(updateButton)
+        parent.removeViewAt(idx)
+        parent.addView(fresh, idx)
+        updateButton = fresh
     }
 
     private fun buildFooter(col: LinearLayout) {
