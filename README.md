@@ -41,12 +41,15 @@ design language: black, white, one red, and dots everywhere.
 - **Unlock.** A dot padlock opens and a tick lands when you unlock the phone.
 - **Earbuds.** When Bluetooth headphones connect, the island shows their battery (needs the optional
   Nearby devices permission).
-- **Quick toggles.** Long-press the island for torch, ring / vibrate / silent, rotation lock and
-  settings.
+- **Quick toggles.** Long-press the island for torch, ring / vibrate / silent, volume, rotation
+  lock, a focus timer and settings.
 - **Volume in the island.** With *Show above status bar* on, the volume keys drive a dot-matrix
   volume bar in the island instead of the system panel (it falls back to the normal panel while
-  the island is hidden or the phone is ringing). Presses are routed like the hardware keys (media,
-  calls, Cast); if that ever moves nothing, the island adjusts the volume directly instead.
+  the island is hidden or the phone is ringing). Slide sideways on the bar to set the volume by
+  touch, or open it from the long-press panel's *Volume* button. Presses are routed like the
+  hardware keys (media, calls, Cast); an app that leaves the phone in call mode with no call going
+  on no longer steals them, and if a press ever moves nothing the island adjusts the volume
+  directly instead.
 - **Toggle confirmations.** Do Not Disturb, Wi-Fi and Bluetooth flash ON / OFF with a dot icon.
 - **Buttons and quick replies.** Notifications show the app's own buttons (Mark as read, Like…) and
   one-tap replies (👍, "On my way") sent straight through the app's Reply.

@@ -18,6 +18,7 @@ import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.hardware.camera2.CameraManager
+import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.AudioRecordingConfiguration
 import android.media.MediaRecorder
@@ -99,7 +100,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
             ACTION_DEMO_PROGRESS -> demoLive(LiveInfo.Kind.PROGRESS)
             ACTION_DEMO_UNLOCK -> { IslandHub.unlockLog = "Demo"; island?.showUnlock() }
             ACTION_DEMO_BUDS -> island?.showBuds(78, "Nothing Ear")
-            ACTION_DEMO_VOLUME -> island?.showVolume(9, 15)
+            ACTION_DEMO_VOLUME -> openVolumeBar()
             ACTION_DEMO_DND -> island?.showStatus(Glyph.MOON, "ON", true)
             ACTION_DEMO_REPLY -> island?.showNotice(demoReplyNotice())
             ACTION_DEMO_EVENT -> { demoLive(LiveInfo.Kind.EVENT); announceEvent("demo:event", "Standup", System.currentTimeMillis() + 10 * 60_000, null) }
@@ -484,7 +485,9 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
     fun stepVolume(up: Boolean) {
         val am = getSystemService(AudioManager::class.java) ?: return
         val dir = if (up) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER
-        if (SystemClock.uptimeMillis() < directVolumeUntil) {
+        // An app left the phone in call mode with no call going on: the system would move the call
+        // volume, so move what's playing instead.
+        if (SystemClock.uptimeMillis() < directVolumeUntil || staleCallMode(am)) {
             adjustDirectly(am, likelyStream(am), dir)
             return
         }
@@ -509,7 +512,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
             when {
                 moved != null -> {
                     lastVolume = "${streamName(stream)} ${before[moved]} → ${am.getStreamVolume(stream)}"
-                    island?.showVolume(am.getStreamVolume(stream), am.getStreamMaxVolume(stream))
+                    island?.showVolume(am.getStreamVolume(stream), am.getStreamMaxVolume(stream), stream)
                 }
                 canMove(am, stream, up) -> {
                     volumeFallbacks++
@@ -519,7 +522,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
                 }
                 else -> {
                     lastVolume = "${streamName(stream)} already at its ${if (up) "maximum" else "minimum"}"
-                    island?.showVolume(am.getStreamVolume(stream), am.getStreamMaxVolume(stream))
+                    island?.showVolume(am.getStreamVolume(stream), am.getStreamMaxVolume(stream), stream)
                 }
             }
         }, VOLUME_READBACK_MS)
@@ -533,12 +536,42 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         }
         val now = am.getStreamVolume(stream)
         lastVolume = "${streamName(stream)} $was → $now, set directly"
-        island?.showVolume(now, am.getStreamMaxVolume(stream))
+        island?.showVolume(now, am.getStreamMaxVolume(stream), stream)
     }
 
-    private fun likelyStream(am: AudioManager) = when (am.mode) {
-        AudioManager.MODE_IN_CALL, AudioManager.MODE_IN_COMMUNICATION -> AudioManager.STREAM_VOICE_CALL
-        else -> AudioManager.STREAM_MUSIC
+    private fun likelyStream(am: AudioManager) =
+        if (inVoiceCall(am)) AudioManager.STREAM_VOICE_CALL else AudioManager.STREAM_MUSIC
+
+    /** A call that's really happening: the phone's own, or an app playing call audio right now. */
+    private fun inVoiceCall(am: AudioManager): Boolean = when (am.mode) {
+        AudioManager.MODE_IN_CALL -> true
+        AudioManager.MODE_IN_COMMUNICATION -> IslandHub.call != null || am.activePlaybackConfigurations.any {
+            it.audioAttributes.usage == AudioAttributes.USAGE_VOICE_COMMUNICATION
+        }
+        else -> false
+    }
+
+    private fun staleCallMode(am: AudioManager) =
+        am.mode == AudioManager.MODE_IN_COMMUNICATION && !inVoiceCall(am)
+
+    /** Dragging the island's volume bar. */
+    override fun setVolume(stream: Int, level: Int): Int {
+        val am = getSystemService(AudioManager::class.java) ?: return level
+        try {
+            am.setStreamVolume(stream, level, 0)
+        } catch (_: SecurityException) {
+            // Ring and notification can't reach zero without Do Not Disturb access.
+        }
+        val now = am.getStreamVolume(stream)
+        lastVolume = "${streamName(stream)} dragged to $now"
+        return now
+    }
+
+    /** The long-press panel's Volume button: the bar for whatever is playing, held open to drag. */
+    private fun openVolumeBar() {
+        val am = getSystemService(AudioManager::class.java) ?: return
+        val stream = likelyStream(am)
+        island?.showVolume(am.getStreamVolume(stream), am.getStreamMaxVolume(stream), stream, linger = true)
     }
 
     private fun canMove(am: AudioManager, stream: Int, up: Boolean): Boolean {
@@ -720,6 +753,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
                 Settings.System.putInt(contentResolver, Settings.System.ACCELEROMETER_ROTATION, if (autoRotate()) 0 else 1)
             }
             IslandView.Quick.FOCUS -> toggleFocus()
+            IslandView.Quick.VOLUME -> openVolumeBar()
             IslandView.Quick.SETTINGS -> openSettings()
         }
         island?.refreshQuick()

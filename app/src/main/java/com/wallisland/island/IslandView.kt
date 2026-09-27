@@ -42,6 +42,9 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
 
         /** Battery percent for the double-tap peek, or -1. */
         fun batteryLevel(): Int
+
+        /** Sets [stream] to [level] (dragging the volume bar) and returns the level it ended up at. */
+        fun setVolume(stream: Int, level: Int): Int
     }
 
     data class QuickState(
@@ -52,7 +55,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         val focusOn: Boolean = false,
     )
 
-    enum class Quick { TORCH, RINGER, ROTATE, FOCUS, SETTINGS }
+    enum class Quick { TORCH, RINGER, VOLUME, ROTATE, FOCUS, SETTINGS }
 
     private enum class Mode {
         IDLE, CALL, LIVE, MEDIA, MEDIA_EXPANDED, NOTICE, CHARGING, RINGER, UNLOCK, BUDS, TOGGLES, VOLUME, STATUS, PEEK,
@@ -64,7 +67,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         data class RingerT(val mode: Int) : Transient()
         data class UnlockT(val startedAt: Long) : Transient()
         data class BudsT(val battery: Int, val name: String?) : Transient()
-        data class VolumeT(val level: Int, val max: Int) : Transient()
+        data class VolumeT(val level: Int, val max: Int, val stream: Int = AudioManager.STREAM_MUSIC) : Transient()
 
         /** A one-line confirmation: a glyph and a word (DND ON, WI-FI OFF, SENT, DONE…). */
         data class StatusT(val glyph: Glyph, val label: String, val lit: Boolean) : Transient()
@@ -133,6 +136,9 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
     private val springH = Spring(0f, 300f, 0.9f, 0.5f)
     private val springAlpha = Spring(0f, 260f, 1f, 0.004f)
     private val springScale = Spring(1f, 600f, 0.7f, 0.001f)
+
+    /** The volume bar's fill (0..1), gliding to each new level. */
+    private val springVolume = Spring(0f, 420f, 0.92f, 0.001f)
 
     /** Content fades out, swaps, then fades back in while the shape is still settling. */
     private var fadeStart = 0L
@@ -332,9 +338,13 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
     /** True when a transient (volume, confirmations) would actually be seen right now. */
     fun canShowTransient() = prefs.enabled && !hidden && screenOn
 
-    fun showVolume(level: Int, max: Int) {
-        if (!canShowTransient()) return
-        showTransient(Transient.VolumeT(level, max), 1600)
+    /** The volume bar; [linger] longer when it was opened by touch, so there's time to drag it. */
+    fun showVolume(level: Int, max: Int, stream: Int = AudioManager.STREAM_MUSIC, linger: Boolean = false) {
+        if (!canShowTransient() || volumeDragging) return
+        val fill = if (max > 0) level.toFloat() / max else 0f
+        // Fresh bar: start full-grown; already showing: glide from where it is.
+        if (transient !is Transient.VolumeT) springVolume.snap(fill) else springVolume.target = fill
+        showTransient(Transient.VolumeT(level, max, stream), if (linger) VOLUME_LINGER_MS else VOLUME_MS)
     }
 
     fun showStatus(glyph: Glyph, label: String, lit: Boolean) {
@@ -510,7 +520,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         val now = SystemClock.uptimeMillis()
         val dt = if (lastFrame == 0L) 1f / 60f else ((now - lastFrame) / 1000f).coerceIn(0f, 0.05f)
         lastFrame = now
-        springW.step(dt); springH.step(dt); springAlpha.step(dt); springScale.step(dt)
+        springW.step(dt); springH.step(dt); springAlpha.step(dt); springScale.step(dt); springVolume.step(dt)
         stepFade(now)
         invalidate()
         if (!springW.moving && !springH.moving) ensureWindow()
@@ -546,7 +556,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
 
     private fun animating() =
         springW.moving || springH.moving || springAlpha.moving || springScale.moving || fadingOut || contentAlpha < 1f ||
-            edgeActive()
+            edgeActive() || springVolume.moving
 
     private fun needsTicker() = screenOn && springAlpha.value > 0f && (
         ((shownMode == Mode.MEDIA || shownMode == Mode.MEDIA_EXPANDED) && media?.playing == true) ||
@@ -561,6 +571,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             if (!isAttachedToWindow) {
                 // Not attached yet: jump straight to the end state.
                 springW.snap(springW.target); springH.snap(springH.target); springAlpha.snap(springAlpha.target)
+                springVolume.snap(springVolume.target)
                 fadingOut = false; shownMode = pendingMode; shownToken = pendingToken; shownTransient = pendingTransient
                 contentAlpha = 1f
             }
@@ -930,7 +941,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         return m.currentPosition()
     }
 
-    private val hitQuick = Array(5) { RectF() }
+    private val hitQuick = Array(Quick.values().size) { RectF() }
     private val tint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val iconSrc = android.graphics.Rect()
 
@@ -1035,11 +1046,12 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         drawHeader(canvas, "Quick", null, alpha)
         val q = host.quickState()
         val cy = pillRect.top + topZone + context.dp(26f)
-        val r = context.dp(21f)
+        val count = Quick.values().size
+        val step = pillRect.width() / count
+        val r = min(context.dp(21f), step / 2f - context.dp(6f))
         val gs = context.dp(15f)
-        val step = pillRect.width() / 5f
         labelPaint.alpha = alpha
-        for (i in 0 until 5) {
+        for (i in 0 until count) {
             val cx = pillRect.left + step * (i + 0.5f)
             val (glyph, label, active) = when (Quick.values()[i]) {
                 Quick.TORCH -> Triple(Glyph.TORCH, "TORCH", q.torch)
@@ -1048,6 +1060,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
                     AudioManager.RINGER_MODE_VIBRATE -> Triple(Glyph.VIBRATE, "VIBRATE", true)
                     else -> Triple(Glyph.BELL, "RING", false)
                 }
+                Quick.VOLUME -> Triple(Glyph.SPEAKER, "VOLUME", false)
                 Quick.ROTATE -> Triple(Glyph.ROTATE, if (q.autoRotate) "ROTATE" else "LOCKED", q.autoRotate)
                 Quick.FOCUS -> Triple(Glyph.TIMER, if (q.focusOn) "STOP" else "FOCUS", q.focusOn)
                 Quick.SETTINGS -> Triple(Glyph.GEAR, "SETUP", false)
@@ -1204,6 +1217,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         if (springAlpha.target == 0f) return false
         if (event.actionMasked == MotionEvent.ACTION_DOWN && !pillRect.contains(event.x, event.y)) return false
         if (scrubTouch(event)) return true
+        if (volumeTouch(event)) return true
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> setPressed(true)
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> setPressed(false)
@@ -1254,6 +1268,12 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             host.openSettings()
             return
         }
+        if (action == Quick.VOLUME) {
+            // Swap the panel for the volume bar, ready to drag.
+            closeToggles()
+            host.quickAction(action)
+            return
+        }
         host.quickAction(action)
         handler.removeCallbacks(togglesTimeout)
         handler.postDelayed(togglesTimeout, 6000)
@@ -1302,6 +1322,76 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             }
         }
         return scrubbing
+    }
+
+    // ---- Dragging the volume bar ----
+
+    private val touchSlop = android.view.ViewConfiguration.get(context).scaledTouchSlop
+    private var volumeDragging = false
+    private var volumeDownX = 0f
+    private var volumeDownY = 0f
+    private var volumeStart = 0
+
+    /**
+     * Slide sideways on the volume bar to set the volume: relative to where the finger lands, so a tap
+     * never jumps it (a tap still closes the bar, a swipe up still dismisses it).
+     */
+    private fun volumeTouch(e: MotionEvent): Boolean {
+        val v = shownTransient as? Transient.VolumeT
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                volumeDragging = false
+                if (shownMode != Mode.VOLUME || v == null) return false
+                volumeDownX = e.x
+                volumeDownY = e.y
+                volumeStart = v.level
+                // Held open while the finger is down.
+                handler.removeCallbacks(transientTimeout)
+                return false
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (!volumeDragging) {
+                    if (shownMode != Mode.VOLUME || v == null) return false
+                    val dx = e.x - volumeDownX
+                    if (abs(dx) < touchSlop || abs(dx) < abs(e.y - volumeDownY)) return false
+                    volumeDragging = true
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                    // The gesture detector saw the press; stop it turning into a tap or long-press.
+                    val cancel = MotionEvent.obtain(e).apply { action = MotionEvent.ACTION_CANCEL }
+                    gestures.onTouchEvent(cancel)
+                    cancel.recycle()
+                    setPressed(false)
+                }
+                if (v != null) dragVolume(v, e.x)
+                return true
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (shownMode == Mode.VOLUME && transient is Transient.VolumeT) {
+                    handler.removeCallbacks(transientTimeout)
+                    handler.postDelayed(transientTimeout, VOLUME_MS)
+                }
+                if (!volumeDragging) return false
+                volumeDragging = false
+                return true
+            }
+        }
+        return volumeDragging
+    }
+
+    private fun dragVolume(v: Transient.VolumeT, x: Float) {
+        if (v.max <= 0) return
+        val span = (pillRect.width() - context.dp(40f)).coerceAtLeast(1f)
+        val want = (volumeStart + (x - volumeDownX) / span * v.max).roundToInt().coerceIn(0, v.max)
+        if (want == v.level) return
+        val got = host.setVolume(v.stream, want)
+        if (got == v.level) return
+        buzz()
+        val next = v.copy(level = got)
+        transient = next
+        pendingTransient = next
+        shownTransient = next
+        springVolume.target = got.toFloat() / v.max
+        kick()
     }
 
     private fun updateScrub(x: Float) {
@@ -1552,21 +1642,26 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         glyphPaint.alpha = alpha
         (if (v.level == 0) Glyph.MUTE else Glyph.SPEAKER).draw(canvas, leftSlotStart(), cy, compactSize(14f), glyphPaint)
         drawRightText(canvas, "$pct%", Look.WHITE, alpha)
-        // A row of dots under the camera line, filling left to right.
+        // A row of dots under the camera line, filling left to right and gliding between levels. The lit
+        // end is the accent colour, and swells while it's being dragged.
         val barY = pillRect.top + topZone + context.dp(8f)
         val left = pillRect.left + context.dp(20f)
         val right = pillRect.right - context.dp(20f)
         val n = 20
-        val lit = ((pct / 100f) * n).roundToInt()
+        val lit = springVolume.value.coerceIn(0f, 1f) * n
+        val head = kotlin.math.ceil(lit).toInt() - 1
         val step = (right - left) / (n - 1)
+        val r = context.dp(1.9f)
         for (i in 0 until n) {
+            val fill = (lit - i).coerceIn(0f, 1f)
             dotPaint.color = when {
-                i >= lit -> Look.DOT_OFF
-                i == lit - 1 -> Look.accent
+                fill <= 0f -> Look.DOT_OFF
+                i == head -> Look.accent
                 else -> Look.WHITE
             }
-            dotPaint.alpha = alpha
-            canvas.drawCircle(left + i * step, barY, context.dp(1.9f), dotPaint)
+            dotPaint.alpha = if (fill <= 0f) alpha else (alpha * (0.35f + 0.65f * fill)).toInt()
+            val radius = if (i == head && volumeDragging) r * 1.8f else r
+            canvas.drawCircle(left + i * step, barY, radius, dotPaint)
         }
     }
 
@@ -1612,6 +1707,8 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
 
     companion object {
         private const val SKIP_MS = 10_000L
+        private const val VOLUME_MS = 1600L
+        private const val VOLUME_LINGER_MS = 4000L
         private const val EDGE_MS = 1400L
         private val QUICK_REPLIES = listOf("👍", "On my way")
         private const val UNLOCK_WAIT_MS = 4_000L
