@@ -496,6 +496,11 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         }
     }
 
+    /** A reply typed in the reply card went out. */
+    fun showSent() {
+        island?.showStatus(Glyph.CHECK, "SENT", true)
+    }
+
     /** Settings changed or the adb grant just arrived: apply the pop-up choice now. */
     fun refreshPopups() = updateHidden()
 

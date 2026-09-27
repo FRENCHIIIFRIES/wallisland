@@ -59,7 +59,7 @@ design language: black, white, one red, and dots everywhere.
   and others: a car or bag, the arrival time ("8-12 MIN", "7:45"), and a dot travelling along the
   bottom of the pill (real progress when the app reports it).
 - **Split island.** Two things at once (music and a timer, a call and music): the second pops out as
-  its own bubble beside the pill; tap it to open that one.
+  its own bubble to the left of the pill (clear of the status icons); tap it to open that one.
 - **Casting.** Music playing on a TV or speaker (Cast, Spotify Connect) shows a cast glyph and
   "ON LIVING ROOM TV"; the volume keys and the volume bar drive that device instead of the phone.
 - **Wi-Fi and hotspot.** Joining a network shows its name (with precise location allowed) and signal in
@@ -80,6 +80,8 @@ design language: black, white, one red, and dots everywhere.
   on no longer steals them, and if a press ever moves nothing the island adjusts the volume
   directly instead.
 - **Toggle confirmations.** Do Not Disturb, Wi-Fi and Bluetooth flash ON / OFF with a dot icon.
+- **Your own reply.** ✎ REPLY on a message opens a small island-style card at the top with the
+  keyboard up; type and Send, and it goes out through the app's own Reply.
 - **Buttons and quick replies.** Notifications show the app's own buttons (Mark as read, Like…) and
   one-tap replies (👍, "On my way") sent straight through the app's Reply.
 - **Edge light.** Two comets of dots race around the island's outline, in the app's colour, when a

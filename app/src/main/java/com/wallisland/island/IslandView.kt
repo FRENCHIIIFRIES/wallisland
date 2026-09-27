@@ -213,7 +213,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
     private fun bubbleGap() = context.dp(7f)
 
     /**
-     * The bubble pops out to the right of the pill with a springy overshoot, a black circle like the pill
+     * The bubble pops out to the left of the pill (clear of the status icons on the right) with a springy overshoot, a black circle like the pill
      * itself: album art for music, or the glyph of the live activity.
      */
     private fun drawBubble(canvas: Canvas, a: Float) {
@@ -221,7 +221,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         val b = shownBubble ?: return
         if (p <= 0.01f) return
         val d = bubbleSize()
-        val cx = pillRect.right + bubbleGap() + d / 2f
+        val cx = pillRect.left - bubbleGap() - d / 2f
         val cy = pillRect.top + d / 2f
         val r = d / 2f * p.coerceIn(0f, 1.15f)
         bubbleRect.set(cx - d / 2f, cy - d / 2f, cx + d / 2f, cy + d / 2f)
@@ -2218,7 +2218,8 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
     // ---- Notification buttons and quick replies ------------------------------------------------------------
 
     /** A chip under a notification: one of the app's own buttons, or a canned reply sent through its Reply. */
-    private class Chip(val label: String, val action: NoticeAction, val replyText: String?)
+    /** A button under a notification: a canned reply, the typed-reply chip, or one of the app's own actions. */
+    private class Chip(val label: String, val action: NoticeAction, val replyText: String?, val typed: Boolean = false)
 
     private val chipHits = ArrayList<Pair<RectF, Chip>>()
     private val chipPaint by lazy { textPaint(Look.monoBold(context), 11.5f, Look.WHITE) }
@@ -2226,7 +2227,11 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
     private fun chipsFor(n: Notice): List<Chip> {
         val out = ArrayList<Chip>()
         val reply = n.actions.firstOrNull { it.reply != null }
-        if (reply != null) QUICK_REPLIES.take(2).forEach { out += Chip(it, reply, it) }
+        if (reply != null) {
+            // Your own words first, then the one-tap replies.
+            out += Chip("✎ Reply", reply, null, typed = true)
+            QUICK_REPLIES.take(2).forEach { out += Chip(it, reply, it) }
+        }
         for (a in n.actions) {
             if (out.size >= 3) break
             if (a.reply != null) continue
@@ -2251,10 +2256,18 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             val w = chipPaint.measureText(label) + context.dp(24f)
             if (x + w > limit) break
             val rect = RectF(x, cy - h / 2f, x + w, cy + h / 2f)
-            dotPaint.color = if (c.replyText != null) Look.RAISED else Look.LINE
+            dotPaint.color = when {
+                c.typed -> appColor(n)
+                c.replyText != null -> Look.RAISED
+                else -> Look.LINE
+            }
             dotPaint.alpha = alpha
             canvas.drawRoundRect(rect, h / 2f, h / 2f, dotPaint)
+            // Dark text on the coloured typed-reply chip, white on the others.
+            chipPaint.color = if (c.typed) Look.BLACK else Look.WHITE
+            chipPaint.alpha = alpha
             drawText(canvas, label, x + context.dp(12f), cy, w, chipPaint, centerY = true)
+            chipPaint.color = Look.WHITE
             chipHits += rect to c
             x += w + context.dp(8f)
         }
@@ -2266,6 +2279,11 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         buzz()
         val a = chip.action
         val input = a.reply
+        if (chip.typed) {
+            ReplyActivity.open(context, n, a)
+            endTransient()
+            return true
+        }
         if (chip.replyText != null && input != null) {
             val fill = android.content.Intent()
             val results = android.os.Bundle().apply { putCharSequence(input.resultKey, chip.replyText) }
