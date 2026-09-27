@@ -55,7 +55,7 @@ class IslandNotificationListener : NotificationListenerService() {
             for (sbn in active) toLive(sbn)?.let { IslandHub.putLive(it) }
             // Fill the recent list with what's already in the shade, without popping any of it up.
             val ranking = currentRanking
-            IslandHub.seedHistory(active.filter { !isCall(it) && toLive(it) == null }.mapNotNull { toNotice(it, ranking) })
+            IslandHub.seedHistory(active.filter { !isCall(it) && toLive(it) == null }.mapNotNull { toNotice(it, ranking)?.first })
         } catch (_: Exception) {
         }
         try {
@@ -91,8 +91,9 @@ class IslandNotificationListener : NotificationListenerService() {
             return
         }
         IslandHub.removeLive(sbn.key)
-        val notice = toNotice(sbn, rankingMap) ?: return
-        IslandHub.postNotice(notice)
+        val (notice, popUp) = toNotice(sbn, rankingMap) ?: return
+        // Muted apps and silent notifications don't pop up, but still land in the recent list.
+        if (popUp) IslandHub.postNotice(notice) else IslandHub.addQuiet(notice)
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {
@@ -102,10 +103,11 @@ class IslandNotificationListener : NotificationListenerService() {
         IslandHub.removeNotice(sbn.key)
     }
 
-    private fun toNotice(sbn: StatusBarNotification, rankingMap: RankingMap?): Notice? {
+    /** The notification, and whether it should pop up (false: muted app, silent channel, or a repeat). */
+    private fun toNotice(sbn: StatusBarNotification, rankingMap: RankingMap?): Pair<Notice, Boolean>? {
         val n = sbn.notification ?: return null
         if (sbn.packageName == packageName) return null
-        if (sbn.packageName in prefs.blockedApps) return null
+        var popUp = sbn.packageName !in prefs.blockedApps
         if (sbn.isOngoing || n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return null
         if (n.flags and Notification.FLAG_FOREGROUND_SERVICE != 0) return null
         val extras = n.extras ?: return null
@@ -115,12 +117,12 @@ class IslandNotificationListener : NotificationListenerService() {
         // Respect the user's channel settings: silent notifications stay silent.
         val ranking = Ranking()
         if (rankingMap?.getRanking(sbn.key, ranking) == true) {
-            if (ranking.importance in 1 until NotificationManager.IMPORTANCE_DEFAULT) return null
             if (android.os.Build.VERSION.SDK_INT >= 29 && ranking.isSuspended) return null
+            if (ranking.importance in 1 until NotificationManager.IMPORTANCE_DEFAULT) popUp = false
         }
 
         val alertOnce = n.flags and Notification.FLAG_ONLY_ALERT_ONCE != 0
-        if (alertOnce && seen.containsKey(sbn.key)) return null
+        if (alertOnce && seen.containsKey(sbn.key)) popUp = false
         remember(sbn.key)
 
         val title = (extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)
@@ -157,9 +159,29 @@ class IslandNotificationListener : NotificationListenerService() {
             intent = n.contentIntent,
             autoCancel = n.flags and Notification.FLAG_AUTO_CANCEL != 0,
             actions = actionsOf(n),
-            color = n.color,
+            color = iconColor(sbn.packageName) ?: n.color,
             postedAt = sbn.postTime,
-        )
+        ) to popUp
+    }
+
+    private val iconColors = HashMap<String, Int?>()
+
+    /**
+     * The app's own colour, taken from its launcher icon: WhatsApp green, Instagram pink, Gmail red. Many
+     * apps leave their notification colour on the system's default blue, so that one is only a fallback.
+     */
+    private fun iconColor(pkg: String): Int? = iconColors.getOrPut(pkg) {
+        try {
+            val d = packageManager.getApplicationIcon(pkg)
+            val size = 48
+            val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            val c = android.graphics.Canvas(bmp)
+            d.setBounds(0, 0, size, size)
+            d.draw(c)
+            dominantColor(bmp).also { bmp.recycle() }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private val prefs by lazy { Prefs(this) }
@@ -451,6 +473,35 @@ class IslandNotificationListener : NotificationListenerService() {
             ?.takeIf { it.isNotBlank() }
 
     companion object {
+        /**
+         * The most prominent vivid colour: pixels are grouped by hue and weighted by how saturated and
+         * bright they are; greys, near-black and near-white don't count. Null for a colourless icon.
+         */
+        fun dominantColor(bmp: Bitmap): Int? {
+            val buckets = 24
+            val weight = FloatArray(buckets)
+            val r = FloatArray(buckets); val g = FloatArray(buckets); val b = FloatArray(buckets)
+            val hsv = FloatArray(3)
+            val px = IntArray(bmp.width * bmp.height)
+            bmp.getPixels(px, 0, bmp.width, 0, 0, bmp.width, bmp.height)
+            for (p in px) {
+                if (android.graphics.Color.alpha(p) < 200) continue
+                android.graphics.Color.colorToHSV(p, hsv)
+                if (hsv[1] < 0.35f || hsv[2] < 0.3f) continue
+                val w = hsv[1] * hsv[2]
+                val i = ((hsv[0] / 360f) * buckets).toInt().coerceIn(0, buckets - 1)
+                weight[i] += w
+                r[i] += android.graphics.Color.red(p) * w
+                g[i] += android.graphics.Color.green(p) * w
+                b[i] += android.graphics.Color.blue(p) * w
+            }
+            val best = weight.indices.maxByOrNull { weight[it] } ?: return null
+            // Needs a real presence in the icon, not a few stray pixels.
+            if (weight[best] < px.size * 0.04f) return null
+            val w = weight[best]
+            return android.graphics.Color.rgb((r[best] / w).toInt(), (g[best] / w).toInt(), (b[best] / w).toInt())
+        }
+
         // Notification.CallStyle extras (API 31), read by name so older releases compile against them too.
         private const val EXTRA_CALL_TYPE = "android.callType"
         private const val EXTRA_ANSWER = "android.answerIntent"

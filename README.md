@@ -83,6 +83,9 @@ design language: black, white, one red, and dots everywhere.
   `adb shell pm disable-user --user 0 com.nothing.ntessentialspace` and the same for
   `com.nothing.ntessentialrecorder` (`pm enable` undoes it).
 - **Per-app control.** *Apps that can pop up* lets you turn island notifications off app by app.
+  Muted apps and silent notifications never pop up but still appear in the recent list.
+- **App colours.** The dot, badge and edge light take each app's colour from its icon (WhatsApp
+  green, Instagram pink), since many apps leave their notification colour on the default blue.
 - **Accent colour.** Swap the Nothing red for orange, yellow, green, blue, purple, pink or white.
 - **Charging and low battery.** A five-dot gauge and the percentage in Doto. It turns red at 20%.
   Plugging in sweeps a wave of dots up to the battery level, then a pulse runs along it.

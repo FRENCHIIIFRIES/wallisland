@@ -165,6 +165,13 @@ object IslandHub {
         listener?.onNotice(notice)
     }
 
+    /** A notification that doesn't pop up (muted app, silent channel): only kept in the recent list. */
+    fun addQuiet(notice: Notice) {
+        history.removeAll { it.key == notice.key }
+        history.add(0, notice)
+        while (history.size > HISTORY_SIZE) history.removeAt(history.size - 1)
+    }
+
     /** Notifications already in the shade when the listener connects; newest five kept. */
     fun seedHistory(notices: List<Notice>) {
         val keys = history.map { it.key }.toSet()

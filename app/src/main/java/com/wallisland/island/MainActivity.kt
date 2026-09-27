@@ -322,7 +322,7 @@ class MainActivity : Activity() {
         card.addView(divider())
         card.addView(toggleRow("Idle pill", "Keep a small pill around the camera when nothing's happening", prefs.showIdle) { prefs.showIdle = it })
         card.addView(divider())
-        card.addView(linkRow("Apps that can pop up", "Choose which apps' notifications open the island") {
+        card.addView(linkRow("Apps that can pop up", "Choose which apps pop up. Muted ones still show when you tap the pill") {
             startActivity(Intent(this, AppsActivity::class.java))
         })
         col.addView(card)
