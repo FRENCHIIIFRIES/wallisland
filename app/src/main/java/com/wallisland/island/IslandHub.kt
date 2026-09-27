@@ -67,7 +67,7 @@ data class LiveInfo(
     val intent: PendingIntent?,
 ) {
     /** Ordered by priority: navigation beats deliveries and rides beats timers beats events beats progress. */
-    enum class Kind { NAV, DELIVERY, TIMER, EVENT, PROGRESS }
+    enum class Kind { NAV, DELIVERY, TIMER, EVENT, PROGRESS, HOTSPOT }
 
     /** The time to show for a timer or stopwatch, if any. */
     fun timeText(now: Long = System.currentTimeMillis()): String? {
@@ -101,6 +101,9 @@ data class MediaInfo(
     val positionAt: Long,
     val speed: Float,
     val controller: MediaController?,
+    /** Playing on another device (Cast, Spotify Connect…), and that device's name when the app says. */
+    val remote: Boolean = false,
+    val device: String? = null,
 ) {
     /** Extrapolates the playhead from the last reported position, like the system media controls do. */
     fun currentPosition(): Long {

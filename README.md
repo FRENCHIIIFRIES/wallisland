@@ -15,7 +15,8 @@ design language: black, white, one red, and dots everywhere.
 | ![Incoming call](docs/screens/call-incoming.png) | ![Hang up](docs/screens/call-hangup.png) |
 | ![Delivery](docs/screens/delivery.png) | ![Ride](docs/screens/ride.png) |
 | ![Timers](docs/screens/timers.png) | ![Brightness](docs/screens/brightness.png) |
-| ![Unlock](docs/screens/unlock.png) | |
+| ![Unlock](docs/screens/unlock.png) | ![Wi-Fi](docs/screens/wifi.png) |
+| ![Split island](docs/screens/split.png) | ![Casting](docs/screens/cast.png) |
 
 ![Recent notifications](docs/screens/history.png)
 
@@ -57,6 +58,18 @@ design language: black, white, one red, and dots everywhere.
 - **Deliveries and rides.** Uber, Uber Eats, Deliveroo, Just Eat, DoorDash, Swiggy, Zomato, Lyft, Bolt
   and others: a car or bag, the arrival time ("8-12 MIN", "7:45"), and a dot travelling along the
   bottom of the pill (real progress when the app reports it).
+- **Split island.** Two things at once (music and a timer, a call and music): the second pops out as
+  its own bubble beside the pill; tap it to open that one.
+- **Casting.** Music playing on a TV or speaker (Cast, Spotify Connect) shows a cast glyph and
+  "ON LIVING ROOM TV"; the volume keys and the volume bar drive that device instead of the phone.
+- **Wi-Fi and hotspot.** Joining a network shows its name (with precise location allowed) and signal in
+  dots. Turning the hotspot on keeps a live pill with the mobile data used since (Android doesn't let
+  apps count the connected devices).
+- **Mic and camera in use.** An orange (mic) or green (camera) dot in the idle pill, and a short note
+  naming the app on screen when it starts.
+- **Steps.** The double-tap peek shows today's steps beside the weather, with a ring of dots filling
+  toward 10,000 (physical activity permission; the phone's own step counter, batched to save battery).
+- **Vibration styles.** Soft, Sharp or Off, separately for touches, notifications and alerts.
 - **Battery Saver.** At 15% the island offers Battery Saver in one tap: switched on directly with the
   same adb grant as pop-ups, otherwise it opens the Battery Saver screen.
 - **Volume in the island.** With *Show above status bar* on, the volume keys drive a dot-matrix

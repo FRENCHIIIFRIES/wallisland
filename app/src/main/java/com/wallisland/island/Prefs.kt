@@ -26,6 +26,17 @@ class Prefs(context: Context) {
     var hideFullscreen by bool("hide_fullscreen", true)
     var hideLandscape by bool("hide_landscape", true)
     var haptics by bool("haptics", true)
+
+    /** Vibration style per kind: names of Haptics.Style. */
+    var hapticTouch: String
+        get() = sp.getString("haptic_touch", "SOFT") ?: "SOFT"
+        set(v) = sp.edit().putString("haptic_touch", v).apply()
+    var hapticNotice: String
+        get() = sp.getString("haptic_notice", "SOFT") ?: "SOFT"
+        set(v) = sp.edit().putString("haptic_notice", v).apply()
+    var hapticAlert: String
+        get() = sp.getString("haptic_alert", "SHARP") ?: "SHARP"
+        set(v) = sp.edit().putString("haptic_alert", v).apply()
     var dotArt by bool("dot_art", true)
     var dotColor by bool("dot_color", true)
     var autoAlign by bool("auto_align", true)
@@ -39,6 +50,15 @@ class Prefs(context: Context) {
     var quickButtons: String
         get() = sp.getString("quick_buttons", null) ?: IslandView.Quick.DEFAULT.joinToString(",") { it.name }
         set(v) = sp.edit().putString("quick_buttons", v).apply()
+
+    /** Steps in the double-tap peek: the goal, and the counter reading today started from. */
+    var showSteps by bool("show_steps", true)
+
+    /** Two things at once: the second gets its own bubble beside the pill. */
+    var splitIsland by bool("split_island", true)
+    var stepGoal by int("step_goal", 10_000)
+    var stepDay by int("step_day", 0)
+    var stepBase by long("step_base", 0L)
 
     /** Weather beside the time in the double-tap peek, and the rough spot it's for. */
     var showWeather by bool("show_weather", true)

@@ -434,6 +434,7 @@ class IslandNotificationListener : NotificationListenerService() {
                 override fun onPlaybackStateChanged(state: PlaybackState?) = publishMedia()
                 override fun onMetadataChanged(metadata: MediaMetadata?) = publishMedia()
                 override fun onSessionDestroyed() = publishMedia()
+                override fun onAudioInfoChanged(info: MediaController.PlaybackInfo?) = publishMedia()
             }
             c.registerCallback(cb, main)
             controllers += c to cb
@@ -477,8 +478,24 @@ class IslandNotificationListener : NotificationListenerService() {
                 positionAt = st?.lastPositionUpdateTime ?: 0L,
                 speed = st?.playbackSpeed?.takeIf { it > 0f } ?: 1f,
                 controller = chosen,
+                remote = chosen.playbackInfo?.playbackType == MediaController.PlaybackInfo.PLAYBACK_TYPE_REMOTE,
+                device = castDevice(chosen.packageName),
             )
         )
+    }
+
+    /**
+     * Where it's playing, when the app says so in its media notification ("Living Room TV",
+     * "Playing on Kitchen speaker"). Only used while the session reports remote playback.
+     */
+    private fun castDevice(pkg: String): String? = try {
+        activeNotifications.orEmpty().firstOrNull {
+            it.packageName == pkg && it.notification.extras?.getString(Notification.EXTRA_TEMPLATE)?.contains("MediaStyle") == true
+        }?.notification?.extras?.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()
+            ?.replace(Regex("^(playing on|connected to|casting to)\\s+", RegexOption.IGNORE_CASE), "")
+            ?.trim()?.takeIf { it.isNotEmpty() }
+    } catch (_: Exception) {
+        null
     }
 
     private fun MediaMetadata.title(): String? =

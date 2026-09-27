@@ -25,6 +25,12 @@
     <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
     <!-- Weather in the double-tap peek: a rough location, read when the settings screen is open. -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Wi-Fi network names on connect: Android only reveals them with precise location. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- Steps in the double-tap peek. -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
     <!-- Granted by the user with adb only: lets the island switch the system pop-up banners off. -->
     <uses-permission
         android:name="android.permission.WRITE_SECURE_SETTINGS"

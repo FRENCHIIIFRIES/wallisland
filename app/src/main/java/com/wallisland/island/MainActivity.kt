@@ -79,6 +79,7 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 6) Steps.start(applicationContext)
         refresh()
     }
 
@@ -89,6 +90,24 @@ class MainActivity : Activity() {
         // Android only gives location to the app on screen, so note it now for the island's weather.
         Weather.locate(this)
         IslandService.current?.refreshPopups()
+    }
+
+    /** A vibration kind with its Soft / Sharp / Off style; choosing one plays it. */
+    private fun hapticRow(title: String, sub: String, get: () -> String, set: (String) -> Unit): View {
+        lateinit var row: View
+        row = linkRow(title, "$sub · ${Haptics.style(get()).label}") {
+            val all = Haptics.Style.values()
+            android.app.AlertDialog.Builder(this)
+                .setTitle(title)
+                .setSingleChoiceItems(all.map { it.label }.toTypedArray(), all.indexOf(Haptics.style(get()))) { d, which ->
+                    set(all[which].name)
+                    (((row as? LinearLayout)?.getChildAt(0) as? LinearLayout)?.getChildAt(1) as? TextView)?.text =
+                        "$sub · ${all[which].label}"
+                    d.dismiss()
+                }
+                .show()
+        }
+        return row
     }
 
     /** Choose which buttons the long-press panel shows (up to five), in their fixed order. */
@@ -245,9 +264,16 @@ class MainActivity : Activity() {
         ) { requestPermissions(arrayOf(Manifest.permission.READ_CALENDAR), 3) })
         card.addView(divider())
         card.addView(permissionRow(
-            "Location", "Optional. A rough location for the weather in the double-tap peek.",
+            "Location", "Optional. Weather in the double-tap peek, and Wi-Fi names when you connect (precise).",
             granted = { Weather.hasLocationPermission(this) },
-        ) { requestPermissions(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION), 4) })
+        ) { requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION), 4) })
+        if (Build.VERSION.SDK_INT >= 29) {
+            card.addView(divider())
+            card.addView(permissionRow(
+                "Physical activity", "Optional. Today's steps in the double-tap peek.",
+                granted = { Steps.hasPermission(this) },
+            ) { requestPermissions(arrayOf(Manifest.permission.ACTIVITY_RECOGNITION), 6) })
+        }
         if (Build.VERSION.SDK_INT >= 28) {
             card.addView(divider())
             card.addView(permissionRow(
@@ -339,6 +365,10 @@ class MainActivity : Activity() {
         card.addView(divider())
         card.addView(toggleRow("Weather", "Double-tap the pill: time, battery and the weather", prefs.showWeather) { prefs.showWeather = it })
         card.addView(divider())
+        card.addView(toggleRow("Split island", "Music and a timer at once? The second gets its own bubble", prefs.splitIsland) { prefs.splitIsland = it })
+        card.addView(divider())
+        card.addView(toggleRow("Steps", "Today's steps in the double-tap peek, toward ${"%,d".format(prefs.stepGoal)}", prefs.showSteps) { prefs.showSteps = it })
+        card.addView(divider())
         popupsRow = toggleRow("Island replaces pop-ups", popupsText(), prefs.replacePopups) { on ->
             prefs.replacePopups = on
             if (on && !IslandService.canReplacePopups(this)) showPopupsGrant()
@@ -428,6 +458,12 @@ class MainActivity : Activity() {
         card.addView(toggleRow("Hide while recording", "Camera and recorder apps. Stays during video calls", prefs.hideWhileCapturing) { prefs.hideWhileCapturing = it })
         card.addView(divider())
         card.addView(toggleRow("Haptics", null, prefs.haptics) { prefs.haptics = it })
+        card.addView(divider())
+        card.addView(hapticRow("Touches", "Buttons, taps and drags", { prefs.hapticTouch }) { prefs.hapticTouch = it; Haptics.tick(this) })
+        card.addView(divider())
+        card.addView(hapticRow("Notifications", "When one lands on the island", { prefs.hapticNotice }) { prefs.hapticNotice = it; Haptics.notice(this) })
+        card.addView(divider())
+        card.addView(hapticRow("Alerts", "Timers finishing, low battery", { prefs.hapticAlert }) { prefs.hapticAlert = it; Haptics.alert(this) })
         col.addView(card)
     }
 

@@ -90,7 +90,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
 
     private enum class Mode {
         IDLE, CALL, CALL_CARD, LIVE, MEDIA, MEDIA_EXPANDED, NOTICE, CHARGING, RINGER, UNLOCK, BUDS, TOGGLES, VOLUME,
-        STATUS, PEEK, HISTORY, TIMERS,
+        STATUS, PEEK, HISTORY, TIMERS, NET,
     }
 
     private sealed class Transient {
@@ -103,6 +103,8 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         data class RingerT(val mode: Int) : Transient()
         data class UnlockT(val startedAt: Long) : Transient()
         data class BudsT(val battery: Int, val name: String?) : Transient()
+        /** Joined a Wi-Fi network: its name and signal (0..4 bars). */
+        data class NetT(val name: String, val bars: Int) : Transient()
         data class VolumeT(
             val level: Int, val max: Int, val stream: Int = AudioManager.STREAM_MUSIC,
             /** The same bar, driving screen brightness instead (level 0..100). */
@@ -195,6 +197,73 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
     private val springH = Spring(0f, 300f, 0.9f, 0.5f)
     private val springAlpha = Spring(0f, 260f, 1f, 0.004f)
     private val springScale = Spring(1f, 600f, 0.7f, 0.001f)
+
+    /** The split island's second bubble: what it shows, and how far it has popped out (0..1). */
+    private sealed class Bubble {
+        object Media : Bubble()
+        data class Live(val live: LiveInfo) : Bubble()
+    }
+
+    private var bubble: Bubble? = null
+    private var shownBubble: Bubble? = null
+    private val springBubble = Spring(0f, 380f, 0.62f, 0.004f)
+    private val bubbleRect = RectF()
+
+    private fun bubbleSize() = context.dp(prefs.height.toFloat())
+    private fun bubbleGap() = context.dp(7f)
+
+    /**
+     * The bubble pops out to the right of the pill with a springy overshoot, a black circle like the pill
+     * itself: album art for music, or the glyph of the live activity.
+     */
+    private fun drawBubble(canvas: Canvas, a: Float) {
+        val p = springBubble.value
+        val b = shownBubble ?: return
+        if (p <= 0.01f) return
+        val d = bubbleSize()
+        val cx = pillRect.right + bubbleGap() + d / 2f
+        val cy = pillRect.top + d / 2f
+        val r = d / 2f * p.coerceIn(0f, 1.15f)
+        bubbleRect.set(cx - d / 2f, cy - d / 2f, cx + d / 2f, cy + d / 2f)
+        pill.shader = null
+        pill.alpha = (255 * a * p.coerceIn(0f, 1f)).roundToInt()
+        canvas.drawCircle(cx, cy, r, pill)
+        val alpha = (255 * a * ((p - 0.5f) * 2f).coerceIn(0f, 1f)).roundToInt()
+        if (alpha <= 0) return
+        val gs = d * 0.5f
+        when (b) {
+            Bubble.Media -> {
+                box.set(cx - gs / 2f, cy - gs / 2f, cx + gs / 2f, cy + gs / 2f)
+                if (media?.art != null) drawArt(canvas, box, small = true, alpha = alpha)
+                else drawVisualizer(canvas, cx + gs / 2f, cy, gs / 4f, 3, 4, media?.playing == true, alpha)
+            }
+            is Bubble.Live -> {
+                val g = when (b.live.kind) {
+                    LiveInfo.Kind.NAV -> Glyph.ARROW
+                    LiveInfo.Kind.DELIVERY -> if (b.live.pkg in IslandNotificationListener.RIDE_APPS) Glyph.CAR else Glyph.BAG
+                    LiveInfo.Kind.TIMER -> Glyph.TIMER
+                    LiveInfo.Kind.EVENT -> Glyph.CALENDAR
+                    LiveInfo.Kind.PROGRESS -> Glyph.DOWNLOAD
+                    LiveInfo.Kind.HOTSPOT -> Glyph.HOTSPOT
+                }
+                glyphPaint.color = Look.accent; glyphPaint.alpha = alpha
+                val sz = gs * 0.9f
+                g.draw(canvas, cx - g.width(sz) / 2f, cy, sz, glyphPaint)
+            }
+        }
+    }
+
+    /** Tapping the bubble opens its thing: the music player, or the live activity. */
+    private fun tapBubble() {
+        buzz()
+        when (val b = bubble ?: return) {
+            Bubble.Media -> { mediaExpanded = true; resolve() }
+            is Bubble.Live -> {
+                val l = b.live
+                if (l.pkg == context.packageName && l.kind == LiveInfo.Kind.TIMER) openTimers() else l.intent?.let { send(it) }
+            }
+        }
+    }
 
     /** The volume bar's fill (0..1), gliding to each new level. */
     private val springVolume = Spring(0f, 420f, 0.92f, 0.001f)
@@ -392,7 +461,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             edgeStart = SystemClock.uptimeMillis()
             edgeColor = if (notice.color != 0 && android.graphics.Color.alpha(notice.color) > 0) brighten(notice.color) else Look.accent
         }
-        buzz()
+        Haptics.notice(context)
     }
 
     fun removeNotice(key: String) {
@@ -413,6 +482,25 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
 
     /** True when a transient (volume, confirmations) would actually be seen right now. */
     fun canShowTransient() = prefs.enabled && !hidden && screenOn
+
+    fun showNet(name: String, bars: Int) {
+        if (!canShowTransient() || transient is Transient.NoticeT) return
+        showTransient(Transient.NetT(name, bars.coerceIn(0, 4)), 2600)
+    }
+
+    /** Mic or camera in use by some app: a coloured dot in the idle pill, and a note when it starts. */
+    fun setPrivacy(mic: Boolean, cam: Boolean, app: String?) {
+        val started = (mic && !micOn) || (cam && !camOn)
+        micOn = mic
+        camOn = cam
+        if (started && canShowTransient() && transient !is Transient.NoticeT) {
+            showTransient(Transient.StatusT(if (cam) Glyph.CAMERA else Glyph.MIC, app?.uppercase() ?: if (cam) "CAMERA" else "MIC", true), 2200)
+        }
+        invalidate()
+    }
+
+    private var micOn = false
+    private var camOn = false
 
     /** The brightness bar (0..100), opened from the quick panel and dragged like the volume bar. */
     fun showBrightness(level: Int) {
@@ -547,6 +635,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             t is Transient.VolumeT -> Mode.VOLUME
             t is Transient.StatusT -> Mode.STATUS
             t is Transient.PeekT -> Mode.PEEK
+            t is Transient.NetT -> Mode.NET
             historyOpen -> Mode.HISTORY
             timersOpen -> Mode.TIMERS
             togglesOpen -> Mode.TOGGLES
@@ -562,8 +651,8 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         val idleH = context.dp(prefs.height.toFloat())
         val bigW = min(resources.displayMetrics.widthPixels - context.dp(24f), context.dp(360f))
         // Plug-in wave and weather peek add a row of dots under the camera line.
-        val twoRow = (mode == Mode.CHARGING && (t as? Transient.ChargeT)?.plugIn == true) ||
-            (mode == Mode.PEEK && peekWeather() != null)
+        val twoRow = mode == Mode.NET || (mode == Mode.CHARGING && (t as? Transient.ChargeT)?.plugIn == true) ||
+            (mode == Mode.PEEK && (peekWeather() != null || peekSteps() >= 0))
         val (w, h) = if (twoRow) {
             idleW + 2 * context.dp(SIDE_DP) + context.dp(24f) to idleH + context.dp(22f)
         } else when (mode) {
@@ -574,7 +663,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             Mode.NOTICE -> bigW to idleH + noticeExtra.roundToInt() + context.dp(
                 if ((t as? Transient.NoticeT)?.notice?.actions?.isNotEmpty() == true) 104f else 60f,
             )
-            Mode.VOLUME -> idleW + 2 * context.dp(SIDE_DP) + context.dp(24f) to idleH + context.dp(22f)
+            Mode.VOLUME, Mode.NET -> idleW + 2 * context.dp(SIDE_DP) + context.dp(24f) to idleH + context.dp(22f)
             Mode.MEDIA_EXPANDED -> bigW to idleH + context.dp(172f)
             Mode.CALL_CARD -> bigW to idleH + context.dp(64f)
             Mode.HISTORY -> bigW to idleH + context.dp(14f + HISTORY_ROW_DP * historyItems.size.coerceAtLeast(1))
@@ -588,6 +677,17 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         springAlpha.target = if (visible) 1f else 0f
         host.onTouchable(visible)
 
+        // Split island: a second thing going on at the same time gets its own little bubble.
+        val second = if (!prefs.splitIsland) null else when (mode) {
+            Mode.CALL -> if (mediaVisible()) Bubble.Media else currentLive()?.let { Bubble.Live(it) }
+            Mode.LIVE -> if (mediaVisible()) Bubble.Media else null
+            Mode.MEDIA -> currentLive()?.let { Bubble.Live(it) }
+            else -> null
+        }
+        bubble = second
+        if (second != null) shownBubble = second
+        springBubble.target = if (second != null && visible) 1f else 0f
+
         val token: Any? = when (mode) {
             Mode.NOTICE -> (t as Transient.NoticeT).notice.key + t.notice.title + t.notice.text
             Mode.MEDIA, Mode.MEDIA_EXPANDED -> mode.name + media?.title
@@ -596,7 +696,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             Mode.CALL_CARD -> "card" + c?.key + c?.ringing
             Mode.HISTORY -> Mode.HISTORY.name + historyItems.size
             Mode.LIVE -> currentLive()?.key
-            Mode.UNLOCK, Mode.BUDS, Mode.STATUS, Mode.PEEK -> t
+            Mode.UNLOCK, Mode.BUDS, Mode.STATUS, Mode.PEEK, Mode.NET -> t
             // Volume steps update in place rather than cross-fading on every press.
             Mode.VOLUME -> Mode.VOLUME
             Mode.TOGGLES -> Mode.TOGGLES
@@ -625,7 +725,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         val now = SystemClock.uptimeMillis()
         val dt = if (lastFrame == 0L) 1f / 60f else ((now - lastFrame) / 1000f).coerceIn(0f, 0.05f)
         lastFrame = now
-        springW.step(dt); springH.step(dt); springAlpha.step(dt); springScale.step(dt); springVolume.step(dt)
+        springW.step(dt); springH.step(dt); springAlpha.step(dt); springScale.step(dt); springVolume.step(dt); springBubble.step(dt)
         stepFade(now)
         invalidate()
         if (!springW.moving && !springH.moving) ensureWindow()
@@ -661,7 +761,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
 
     private fun animating() =
         springW.moving || springH.moving || springAlpha.moving || springScale.moving || fadingOut || contentAlpha < 1f ||
-            edgeActive() || springVolume.moving
+            edgeActive() || springVolume.moving || springBubble.moving
 
     private fun needsTicker() = screenOn && springAlpha.value > 0f && (
         ((shownMode == Mode.MEDIA || shownMode == Mode.MEDIA_EXPANDED) && media?.playing == true) ||
@@ -677,6 +777,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
                 // Not attached yet: jump straight to the end state.
                 springW.snap(springW.target); springH.snap(springH.target); springAlpha.snap(springAlpha.target)
                 springVolume.snap(springVolume.target)
+                springBubble.snap(springBubble.target)
                 fadingOut = false; shownMode = pendingMode; shownToken = pendingToken; shownTransient = pendingTransient
                 contentAlpha = 1f
             }
@@ -697,7 +798,9 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
     private fun ensureWindow() {
         val slack = context.dp(12f)
         val settled = !springW.moving && !springH.moving
-        val needW = (max(springW.target, if (settled) 0f else springW.value) * 1.08f + slack).roundToInt()
+        // Room either side for the split bubble, so the pill stays centred on the camera.
+        val bubbleRoom = if (springBubble.target > 0f || springBubble.value > 0.01f) 2 * (bubbleGap() + bubbleSize()) else 0f
+        val needW = (max(springW.target, if (settled) 0f else springW.value) * 1.08f + slack + bubbleRoom).roundToInt()
         val needH = (max(springH.target, if (settled) 0f else springH.value) * 1.08f + slack).roundToInt()
         // An overlay wider than the display gets shoved sideways by the window manager, which knocks the
         // pill off-centre. Cap at the display width; the pill itself always leaves a margin.
@@ -735,6 +838,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             canvas.drawRoundRect(box, r - inset, r - inset, rim)
         }
         if (edgeActive()) drawEdgeLight(canvas, r, a)
+        drawBubble(canvas, a)
 
         val ca = contentAlpha * a
         if (ca <= 0.01f) return
@@ -743,7 +847,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         canvas.save()
         canvas.clipRect(pillRect)
         when (shownMode) {
-            Mode.IDLE -> Unit
+            Mode.IDLE -> drawPrivacyDot(canvas, alpha)
             Mode.MEDIA -> drawMediaCompact(canvas, alpha)
             Mode.CALL -> drawCall(canvas, alpha)
             Mode.CALL_CARD -> drawCallCard(canvas, alpha)
@@ -760,6 +864,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             Mode.VOLUME -> (shownTransient as? Transient.VolumeT)?.let { drawVolume(canvas, it, alpha) }
             Mode.STATUS -> (shownTransient as? Transient.StatusT)?.let { drawStatus(canvas, it, alpha) }
             Mode.PEEK -> drawPeek(canvas, alpha)
+            Mode.NET -> (shownTransient as? Transient.NetT)?.let { drawNet(canvas, it, alpha) }
         }
         canvas.restore()
     }
@@ -800,6 +905,13 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         val s = compactSize(18f)
         box.set(leftSlotStart(), cy - s / 2f, leftSlotStart() + s, cy + s / 2f)
         drawArt(canvas, box, small = true, alpha = alpha)
+        if (m.remote) {
+            // Playing elsewhere: the cast glyph instead of the equaliser.
+            val gs = compactSize(15f)
+            glyphPaint.color = Look.accent; glyphPaint.alpha = alpha
+            Glyph.CAST.draw(canvas, rightSlotEnd() - Glyph.CAST.width(gs), cy, gs, glyphPaint)
+            return
+        }
         drawVisualizer(canvas, rightSlotEnd(), cy, compactSize(15f) / 4f, 4, 4, m.playing, alpha)
     }
 
@@ -1169,8 +1281,21 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
 
     private fun drawMediaExpanded(canvas: Canvas, alpha: Int) {
         val m = media ?: return
-        drawHeader(canvas, m.appName, null, alpha, redDot = m.playing)
-        drawVisualizer(canvas, pillRect.right - context.dp(22f), pillRect.top + topZone / 2f, context.dp(3.4f), 5, 4, m.playing, alpha)
+        if (m.remote) {
+            // "ON LIVING ROOM TV" with the cast glyph, in place of the equaliser.
+            val where = "ON " + (m.device ?: "ANOTHER DEVICE").uppercase()
+            drawHeader(canvas, m.appName, null, alpha, redDot = m.playing)
+            val gs = context.dp(11f)
+            val right = pillRect.right - context.dp(22f)
+            val lw = min(labelPaint.measureText(where), pillRect.width() / 2f - idleHalf - context.dp(30f))
+            labelPaint.alpha = alpha
+            drawText(canvas, where, right - lw, pillRect.top + topZone / 2f, lw + 1f, labelPaint, centerY = true)
+            glyphPaint.color = Look.accent; glyphPaint.alpha = alpha
+            Glyph.CAST.draw(canvas, right - lw - context.dp(6f) - Glyph.CAST.width(gs), pillRect.top + topZone / 2f, gs, glyphPaint)
+        } else {
+            drawHeader(canvas, m.appName, null, alpha, redDot = m.playing)
+            drawVisualizer(canvas, pillRect.right - context.dp(22f), pillRect.top + topZone / 2f, context.dp(3.4f), 5, 4, m.playing, alpha)
+        }
 
         // Artwork: tap to flip between the real cover and the dot-matrix version.
         val pad = context.dp(18f)
@@ -1318,6 +1443,11 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
                     val left = (l.chronoBase - System.currentTimeMillis()).coerceAtLeast(0) / 1000f
                     drawBottomDots(canvas, (left / l.progressMax).coerceIn(0f, 1f), moving = false, alpha = alpha)
                 }
+            }
+            LiveInfo.Kind.HOTSPOT -> {
+                glyphPaint.color = Look.accent; glyphPaint.alpha = alpha
+                Glyph.HOTSPOT.draw(canvas, x, cy, gs, glyphPaint)
+                drawRightText(canvas, l.title.ifEmpty { "ON" }, Look.WHITE, alpha)
             }
             LiveInfo.Kind.DELIVERY -> {
                 val ride = l.pkg in IslandNotificationListener.RIDE_APPS &&
@@ -1759,7 +1889,9 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             return false
         }
         if (springAlpha.target == 0f) return false
-        if (event.actionMasked == MotionEvent.ACTION_DOWN && !pillRect.contains(event.x, event.y)) return false
+        if (event.actionMasked == MotionEvent.ACTION_DOWN && !pillRect.contains(event.x, event.y) &&
+            !(bubbleRect.contains(event.x, event.y) && springBubble.value > 0.5f)
+        ) return false
         if (scrubTouch(event)) return true
         if (volumeTouch(event)) return true
         when (event.actionMasked) {
@@ -1782,6 +1914,10 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
     }
 
     private fun onTap(x: Float, y: Float) {
+        if (springBubble.value > 0.5f && bubbleRect.contains(x, y)) {
+            tapBubble()
+            return
+        }
         when (shownMode) {
             Mode.IDLE -> { springScale.target = 1.06f; kick(); handler.postDelayed({ springScale.target = 1f; kick() }, 120) }
             Mode.MEDIA -> { mediaExpanded = true; buzz(); resolve() }
@@ -1802,7 +1938,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
                 if (n.autoCancel) IslandHub.canceller?.invoke(n.key)
                 endTransient()
             }
-            Mode.CHARGING, Mode.RINGER, Mode.UNLOCK, Mode.BUDS, Mode.VOLUME, Mode.STATUS, Mode.PEEK -> endTransient()
+            Mode.CHARGING, Mode.RINGER, Mode.UNLOCK, Mode.BUDS, Mode.VOLUME, Mode.STATUS, Mode.PEEK, Mode.NET -> endTransient()
             Mode.LIVE -> {
                 val l = currentLive()
                 buzz()
@@ -2034,7 +2170,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             Mode.CALL_CARD -> if (call?.ringing == true) callDismissed = call?.key else callExpanded = false
             Mode.HISTORY -> { closeHistory(); return }
             Mode.LIVE -> currentLive()?.let { liveDismissed += it.key }
-            Mode.NOTICE, Mode.CHARGING, Mode.RINGER, Mode.UNLOCK, Mode.BUDS, Mode.VOLUME, Mode.STATUS, Mode.PEEK -> {
+            Mode.NOTICE, Mode.CHARGING, Mode.RINGER, Mode.UNLOCK, Mode.BUDS, Mode.VOLUME, Mode.STATUS, Mode.PEEK, Mode.NET -> {
                 endTransient(); return
             }
             Mode.TOGGLES -> { closeToggles(); return }
@@ -2222,6 +2358,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         glyphPaint.alpha = alpha
         val icon = when {
             v.brightness -> Glyph.SUN
+            v.stream == REMOTE_STREAM -> Glyph.CAST
             v.level == 0 -> Glyph.MUTE
             else -> Glyph.SPEAKER
         }
@@ -2250,6 +2387,35 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         }
     }
 
+    /** Green while a camera is open, orange while the mic records, just inside the idle pill's right end. */
+    private fun drawPrivacyDot(canvas: Canvas, alpha: Int) {
+        if (!micOn && !camOn) return
+        dotPaint.color = if (camOn) 0xFF2BD16B.toInt() else 0xFFFF9F0A.toInt()
+        dotPaint.alpha = alpha
+        canvas.drawCircle(pillRect.right - pillRect.height() / 2f, pillRect.top + topZone / 2f, context.dp(2.6f), dotPaint)
+    }
+
+    /** Wi-Fi joined: the glyph and signal bars on top, the network's name under the camera. */
+    private fun drawNet(canvas: Canvas, n: Transient.NetT, alpha: Int) {
+        val cy = pillRect.top + topZone / 2f
+        glyphPaint.color = Look.WHITE; glyphPaint.alpha = alpha
+        Glyph.WIFI.draw(canvas, leftSlotStart(), cy, compactSize(14f), glyphPaint)
+        // Four columns of dots, taller to the right, lit up to the signal strength.
+        val pitch = context.dp(3.2f)
+        val right = rightSlotEnd()
+        for (col in 0 until 4) for (row in 0..col) {
+            dotPaint.color = if (col < n.bars) Look.WHITE else Look.DOT_OFF
+            dotPaint.alpha = alpha
+            canvas.drawCircle(right - (3 - col) * pitch * 1.3f - pitch / 2f, cy + pitch * 1.5f - row * pitch, context.dp(1.2f), dotPaint)
+        }
+        val y = pillRect.top + topZone + context.dp(9f)
+        titlePaint.alpha = alpha
+        val room = pillRect.width() - context.dp(32f)
+        val name = fit(n.name, titlePaint, room)
+        val w = titlePaint.measureText(name)
+        drawText(canvas, name, pillRect.centerX() - w / 2f, y, w + 1f, titlePaint, centerY = true)
+    }
+
     private fun drawStatus(canvas: Canvas, s: Transient.StatusT, alpha: Int) {
         val cy = pillRect.top + topZone / 2f
         glyphPaint.color = if (s.lit) Look.WHITE else Look.GREY
@@ -2265,29 +2431,62 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         drawLeftText(canvas, time, Look.WHITE, alpha)
         val b = host.batteryLevel()
         drawRightText(canvas, if (b >= 0) "$b%" else "--", if (b in 0..20) Look.accent else Look.WHITE, alpha)
-        val w = peekWeather() ?: return
-        // Second row, centred under the camera: the sky as dots, then "21° CLOUDY".
+        val w = peekWeather()
+        val steps = peekSteps()
+        if (w == null && steps < 0) return
+        // Second row, centred under the camera: steps as a filling ring of dots, then the sky and "21°".
         val cy = pillRect.top + topZone + context.dp(9f)
         val gs = context.dp(11f)
-        val glyph = Weather.glyph(w)
-        val temp = Weather.temperature(w)
-        val label = Weather.label(w)
         val gap = context.dp(6f)
-        val tempW = titlePaint.measureText(temp)
-        val room = pillRect.width() - context.dp(32f) - glyph.width(gs) - tempW - gap * 2
-        val labelFit = fit(label, labelPaint, room)
-        val total = glyph.width(gs) + gap + tempW + gap + labelPaint.measureText(labelFit)
-        var x = pillRect.centerX() - total / 2f
-        glyphPaint.color = if (glyph == Glyph.SUN) Look.accent else Look.WHITE
-        glyphPaint.alpha = alpha
-        glyph.draw(canvas, x, cy, gs, glyphPaint)
-        x += glyph.width(gs) + gap
+        val stepText = if (steps >= 0) Steps.text(steps) else null
+        val ringW = if (steps >= 0) gs else 0f
+        val glyph = w?.let { Weather.glyph(it) }
+        val temp = w?.let { Weather.temperature(it) }
         titlePaint.alpha = alpha
-        drawText(canvas, temp, x, cy, tempW + 1f, titlePaint, centerY = true)
-        x += tempW + gap
         labelPaint.alpha = alpha
-        drawText(canvas, labelFit, x, cy, room + 1f, labelPaint, centerY = true)
+        val stepW = stepText?.let { ringW + gap * 0.6f + titlePaint.measureText(it) } ?: 0f
+        val tempW = temp?.let { titlePaint.measureText(it) } ?: 0f
+        val weatherW = if (w != null) glyph!!.width(gs) + gap * 0.6f + tempW else 0f
+        val between = if (stepText != null && w != null) gap * 2.5f else 0f
+        // The condition word only when there's room: steps and weather together keep to the numbers.
+        val room = pillRect.width() - context.dp(32f) - stepW - weatherW - between - gap
+        val labelFit = if (w != null && stepText == null) fit(Weather.label(w), labelPaint, room) else ""
+        val labelW = if (labelFit.isNotEmpty()) gap + labelPaint.measureText(labelFit) else 0f
+        var x = pillRect.centerX() - (stepW + between + weatherW + labelW) / 2f
+        if (stepText != null) {
+            drawStepRing(canvas, x + ringW / 2f, cy, ringW / 2f, steps / prefs.stepGoal.coerceAtLeast(1).toFloat(), alpha)
+            x += ringW + gap * 0.6f
+            drawText(canvas, stepText, x, cy, titlePaint.measureText(stepText) + 1f, titlePaint, centerY = true)
+            x += titlePaint.measureText(stepText) + between
+        }
+        if (w != null) {
+            glyphPaint.color = if (glyph == Glyph.SUN) Look.accent else Look.WHITE
+            glyphPaint.alpha = alpha
+            glyph!!.draw(canvas, x, cy, gs, glyphPaint)
+            x += glyph.width(gs) + gap * 0.6f
+            drawText(canvas, temp!!, x, cy, tempW + 1f, titlePaint, centerY = true)
+            x += tempW
+            if (labelFit.isNotEmpty()) drawText(canvas, labelFit, x + gap, cy, room + 1f, labelPaint, centerY = true)
+        }
     }
+
+    /** Twelve dots in a circle, lit clockwise toward the step goal; all red once it's reached. */
+    private fun drawStepRing(canvas: Canvas, cx: Float, cy: Float, r: Float, fraction: Float, alpha: Int) {
+        val n = 12
+        val lit = (fraction.coerceIn(0f, 1f) * n).roundToInt()
+        for (i in 0 until n) {
+            dotPaint.color = when {
+                fraction >= 1f -> Look.accent
+                i < lit -> Look.WHITE
+                else -> Look.DOT_OFF
+            }
+            dotPaint.alpha = alpha
+            val a = -Math.PI / 2 + Math.PI * 2 * i / n
+            canvas.drawCircle(cx + (r * kotlin.math.cos(a)).toFloat(), cy + (r * kotlin.math.sin(a)).toFloat(), context.dp(1.1f), dotPaint)
+        }
+    }
+
+    private fun peekSteps(): Int = if (prefs.showSteps) Steps.today else -1
 
     private fun peekWeather(): Weather.Now? = if (prefs.showWeather) Weather.now else null
 
@@ -2309,14 +2508,14 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         return if (m >= 60) "${m / 60}H${"%02d".format(m % 60)}" else "${m}M"
     }
 
-    private fun buzz() {
-        if (!prefs.haptics) return
-        Haptics.tick(context)
-    }
+    private fun buzz() = Haptics.tick(context)
 
     companion object {
         private const val SKIP_MS = 10_000L
         private const val CALL_CARD_MS = 6_000L
+
+        /** The volume bar's "stream" when it drives a Cast / Connect device instead of the phone. */
+        const val REMOTE_STREAM = -100
         private val TIMER_CHOICES = intArrayOf(1, 5, 10, 25)
         private const val HISTORY_MS = 8_000L
         private const val HISTORY_ROW_DP = 46f

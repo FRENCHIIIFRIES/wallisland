@@ -73,6 +73,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         prefs = Prefs(this)
         Look.accent = prefs.accent
         Weather.refresh(this)
+        Steps.start(this)
         chooseHost()
         goForeground()
         if (!canHost(this) || !prefs.enabled) {
@@ -117,6 +118,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
 
     override fun onDestroy() {
         applyPopups(islandShowsNotices = false)
+        Steps.stop(this)
         running = false
         if (current === this) current = null
         if (IslandHub.listener === this) IslandHub.listener = null
@@ -656,6 +658,20 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
     fun stepVolume(up: Boolean) {
         val am = getSystemService(AudioManager::class.java) ?: return
         val dir = if (up) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER
+        // Casting: the keys drive the speaker or TV the music is playing on.
+        val cast = IslandHub.media?.takeIf { it.remote }?.controller
+        if (cast != null && !inVoiceCall(am)) {
+            try {
+                cast.adjustVolume(dir, 0)
+            } catch (_: Exception) {
+            }
+            main.postDelayed({
+                val pi = cast.playbackInfo ?: return@postDelayed
+                lastVolume = "cast device ${pi.currentVolume}/${pi.maxVolume}"
+                island?.showVolume(pi.currentVolume, pi.maxVolume, IslandView.REMOTE_STREAM)
+            }, VOLUME_READBACK_MS)
+            return
+        }
         // An app left the phone in call mode with no call going on: the system would move the call
         // volume, so move what's playing instead.
         if (SystemClock.uptimeMillis() < directVolumeUntil || staleCallMode(am)) {
@@ -727,6 +743,15 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
 
     /** Dragging the island's volume bar. */
     override fun setVolume(stream: Int, level: Int): Int {
+        if (stream == IslandView.REMOTE_STREAM) {
+            val cast = IslandHub.media?.controller ?: return level
+            try {
+                cast.setVolumeTo(level, 0)
+            } catch (_: Exception) {
+            }
+            lastVolume = "cast device dragged to $level"
+            return level
+        }
         val am = getSystemService(AudioManager::class.java) ?: return level
         try {
             am.setStreamVolume(stream, level, 0)
@@ -740,6 +765,10 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
 
     /** The long-press panel's Volume button: the bar for whatever is playing, held open to drag. */
     private fun openVolumeBar() {
+        IslandHub.media?.takeIf { it.remote }?.controller?.playbackInfo?.let { pi ->
+            island?.showVolume(pi.currentVolume, pi.maxVolume, IslandView.REMOTE_STREAM, linger = true)
+            return
+        }
         val am = getSystemService(AudioManager::class.java) ?: return
         val stream = likelyStream(am)
         island?.showVolume(am.getStreamVolume(stream), am.getStreamMaxVolume(stream), stream, linger = true)
@@ -1105,7 +1134,116 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         updateHidden()
     }
 
+    // ---- Wi-Fi and hotspot ----------------------------------------------------------------------------------
+
+    private var announcedWifi: android.net.Network? = null
+
+    /** Joining a Wi-Fi network: its name (with location permission) and signal, once per connection. */
+    private val wifiCallback: android.net.ConnectivityManager.NetworkCallback =
+        if (Build.VERSION.SDK_INT >= 31) {
+            object : android.net.ConnectivityManager.NetworkCallback(FLAG_INCLUDE_LOCATION_INFO) {
+                override fun onCapabilitiesChanged(network: android.net.Network, caps: android.net.NetworkCapabilities) = onWifi(network, caps)
+                override fun onLost(network: android.net.Network) { if (announcedWifi == network) announcedWifi = null }
+            }
+        } else {
+            object : android.net.ConnectivityManager.NetworkCallback() {
+                override fun onCapabilitiesChanged(network: android.net.Network, caps: android.net.NetworkCapabilities) = onWifi(network, caps)
+                override fun onLost(network: android.net.Network) { if (announcedWifi == network) announcedWifi = null }
+            }
+        }
+
+    private fun onWifi(network: android.net.Network, caps: android.net.NetworkCapabilities) {
+        if (announcedWifi == network || !prefs.showToggleChanges) return
+        if (!caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)) return
+        announcedWifi = network
+        val info = if (Build.VERSION.SDK_INT >= 29) caps.transportInfo as? android.net.wifi.WifiInfo else null
+        val ssid = info?.ssid?.trim('"')?.takeIf { it.isNotBlank() && it != "<unknown ssid>" } ?: "Wi-Fi"
+        @Suppress("DEPRECATION")
+        val bars = info?.rssi?.let { android.net.wifi.WifiManager.calculateSignalLevel(it, 5) } ?: 3
+        main.post { island?.showNet(ssid, bars) }
+    }
+
+    /** Hotspot: on/off from the system broadcast, then data used since it came on, as a live activity. */
+    private val hotspotReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.getIntExtra("wifi_state", -1)) {
+                13 -> startHotspotWatch()
+                11 -> stopHotspotWatch()
+            }
+        }
+    }
+
+    private var hotspotBase = -1L
+
+    private val hotspotTick = object : Runnable {
+        override fun run() {
+            if (hotspotBase < 0) return
+            val used = (android.net.TrafficStats.getMobileRxBytes() + android.net.TrafficStats.getMobileTxBytes() - hotspotBase)
+                .coerceAtLeast(0)
+            val tether = PendingIntent.getActivity(
+                this@IslandService, 8, Intent("android.settings.TETHER_SETTINGS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            IslandHub.putLive(
+                LiveInfo(
+                    key = HOTSPOT_KEY, kind = LiveInfo.Kind.HOTSPOT, pkg = packageName, appName = "Hotspot",
+                    title = bytesShort(used), text = "", icon = null, chronoBase = 0L, countDown = false, staticTime = null,
+                    progress = 0, progressMax = 0, indeterminate = false, postedAt = System.currentTimeMillis(), intent = tether,
+                )
+            )
+            main.postDelayed(this, 10_000)
+        }
+    }
+
+    private fun startHotspotWatch() {
+        if (hotspotBase >= 0) return
+        hotspotBase = android.net.TrafficStats.getMobileRxBytes() + android.net.TrafficStats.getMobileTxBytes()
+        if (prefs.showToggleChanges) island?.showStatus(Glyph.HOTSPOT, "ON", true)
+        hotspotTick.run()
+    }
+
+    private fun stopHotspotWatch() {
+        if (hotspotBase < 0) return
+        hotspotBase = -1L
+        main.removeCallbacks(hotspotTick)
+        IslandHub.removeLive(HOTSPOT_KEY)
+        if (prefs.showToggleChanges) island?.showStatus(Glyph.HOTSPOT, "OFF", false)
+    }
+
+    private fun bytesShort(b: Long): String = when {
+        b >= 1L shl 30 -> "%.1f GB".format(b / (1L shl 30).toDouble())
+        b >= 1L shl 20 -> "${b shr 20} MB"
+        else -> "${b shr 10} KB"
+    }
+
+    private fun registerNetWatchers() {
+        try {
+            val req = android.net.NetworkRequest.Builder().addTransportType(android.net.NetworkCapabilities.TRANSPORT_WIFI).build()
+            getSystemService(android.net.ConnectivityManager::class.java)?.registerNetworkCallback(req, wifiCallback)
+        } catch (_: Exception) {
+        }
+        val f = IntentFilter("android.net.wifi.WIFI_AP_STATE_CHANGED")
+        try {
+            if (Build.VERSION.SDK_INT >= 33) registerReceiver(hotspotReceiver, f, Context.RECEIVER_EXPORTED)
+            else registerReceiver(hotspotReceiver, f)
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun unregisterNetWatchers() {
+        try {
+            getSystemService(android.net.ConnectivityManager::class.java)?.unregisterNetworkCallback(wifiCallback)
+        } catch (_: Exception) {
+        }
+        try {
+            unregisterReceiver(hotspotReceiver)
+        } catch (_: Exception) {
+        }
+        main.removeCallbacks(hotspotTick)
+    }
+
     private fun registerCaptureWatchers() {
+        registerNetWatchers()
         try {
             getSystemService(CameraManager::class.java)?.registerAvailabilityCallback(cameraCallback, main)
         } catch (_: Exception) {
@@ -1119,6 +1257,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
     }
 
     private fun unregisterCaptureWatchers() {
+        unregisterNetWatchers()
         try {
             getSystemService(CameraManager::class.java)?.unregisterAvailabilityCallback(cameraCallback)
             getSystemService(CameraManager::class.java)?.unregisterTorchCallback(torchCallback)
@@ -1146,6 +1285,9 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
             else -> camerasInUse
         }
         val now = cams.isNotEmpty() || recorder
+        // Privacy dot: any recording at all counts for the mic; the app is whichever is on screen.
+        val app = IslandAccessibilityService.foreground?.let { IslandNotificationListener.appLabel(this, it) }
+        island?.setPrivacy(mic = recordingsInUse.isNotEmpty(), cam = cams.isNotEmpty(), app = app)
         main.removeCallbacks(applyCapture)
         if (now) {
             if (!capturing) main.postDelayed(applyCapture, 800)
@@ -1175,6 +1317,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
             when (intent.action) {
                 Intent.ACTION_SCREEN_ON -> {
                     island?.setScreenOn(true)
+                    Steps.start(this@IslandService)
                     // Have the weather ready before the double-tap asks for it.
                     Weather.refresh(this@IslandService)
                     startLockWatch()
@@ -1325,6 +1468,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
                 LiveInfo.Kind.PROGRESS -> "Downloading"
                 LiveInfo.Kind.EVENT -> "Standup"
                 LiveInfo.Kind.DELIVERY -> "8 MIN"
+                LiveInfo.Kind.HOTSPOT -> "1.2 GB"
             },
             text = "", icon = null,
             chronoBase = when (kind) {
@@ -1404,6 +1548,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
 
         private const val FOCUS_KEY = "focus"
         private const val STOPWATCH_KEY = "stopwatch"
+        private const val HOTSPOT_KEY = "hotspot"
         const val ACTION_SAVER_ON = "com.wallisland.island.SAVER_ON"
         private const val SAVER_AT = 15
         private const val FOCUS_MS = 25 * 60_000L

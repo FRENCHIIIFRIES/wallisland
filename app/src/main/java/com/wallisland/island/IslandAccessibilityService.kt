@@ -47,6 +47,7 @@ class IslandAccessibilityService : AccessibilityService() {
         if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val pkg = event.packageName?.toString() ?: return
         if (pkg == packageName) return
+        if (pkg != "com.android.systemui" && pkg != "android") foreground = pkg
         val now = SystemClock.uptimeMillis()
 
         if (now < learnAppUntil) noteLearnedApp(pkg)
@@ -249,6 +250,9 @@ class IslandAccessibilityService : AccessibilityService() {
         @Volatile var learning = false
         var onLearned: ((Int) -> Unit)? = null
         var onLearnedApp: ((String) -> Unit)? = null
+
+        /** The app whose window last came to the front (package name only), for the mic/camera dot. */
+        @Volatile var foreground: String? = null
 
         /** What the Essential Space blocker last did, for Troubleshoot. */
         @Volatile var lastClosed = "nothing closed yet"
