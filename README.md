@@ -64,7 +64,8 @@ design language: black, white, one red, and dots everywhere.
 - **Calls.** A ringing call opens a card with green Answer and red Decline. Tap an ongoing call's
   pill for a red hang-up button. Uses the call's own notification buttons; for calls without them,
   the optional *Phone calls* permission lets the island answer and hang up through Android.
-- **Recent notifications.** Tap the empty pill (or swipe down on it) for your last five
+- **Recent notifications.** Tap the empty pill, swipe down on it, or use RECENT in the long-press
+  panel for your last five
   notifications, including ones already in the shade; tap one to open it. Tap "ALL ›" or swipe down
   again for the full notification shade.
 - **Island replaces pop-ups.** Stops notifications showing twice (the system banner and the island).

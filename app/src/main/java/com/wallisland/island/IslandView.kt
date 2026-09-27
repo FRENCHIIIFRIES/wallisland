@@ -61,7 +61,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         val focusOn: Boolean = false,
     )
 
-    enum class Quick { TORCH, RINGER, VOLUME, ROTATE, FOCUS, SETTINGS }
+    enum class Quick { TORCH, RINGER, VOLUME, RECENT, ROTATE, FOCUS, SETTINGS }
 
     private enum class Mode {
         IDLE, CALL, CALL_CARD, LIVE, MEDIA, MEDIA_EXPANDED, NOTICE, CHARGING, RINGER, UNLOCK, BUDS, TOGGLES, VOLUME,
@@ -1341,6 +1341,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
                     else -> Triple(Glyph.BELL, "RING", false)
                 }
                 Quick.VOLUME -> Triple(Glyph.SPEAKER, "VOLUME", false)
+                Quick.RECENT -> Triple(Glyph.LIST, "RECENT", false)
                 Quick.ROTATE -> Triple(Glyph.ROTATE, if (q.autoRotate) "ROTATE" else "LOCKED", q.autoRotate)
                 Quick.FOCUS -> Triple(Glyph.TIMER, if (q.focusOn) "STOP" else "FOCUS", q.focusOn)
                 Quick.SETTINGS -> Triple(Glyph.GEAR, "SETUP", false)
@@ -1352,8 +1353,13 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             glyphPaint.color = if (active) Look.BLACK else if (dim) Look.DOT_OFF else Look.WHITE
             glyphPaint.alpha = alpha
             glyph.draw(canvas, cx - glyph.width(gs) / 2f, cy, gs, glyphPaint)
+            // Shrink a long label ("VIBRATE") to its slot rather than let neighbours touch.
+            val baseSize = labelPaint.textSize
+            val room = step - context.dp(4f)
+            if (labelPaint.measureText(label) > room) labelPaint.textSize = baseSize * room / labelPaint.measureText(label)
             val lw = labelPaint.measureText(label)
             drawText(canvas, label, cx - lw / 2f, cy + r + context.dp(12f), lw + 1f, labelPaint, centerY = true)
+            labelPaint.textSize = baseSize
             hitQuick[i].set(cx - step / 2f, cy - r - context.dp(6f), cx + step / 2f, cy + r + context.dp(20f))
         }
     }
@@ -1595,6 +1601,11 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         if (action == Quick.SETTINGS) {
             closeToggles()
             host.openSettings()
+            return
+        }
+        if (action == Quick.RECENT) {
+            closeToggles()
+            openHistory(fromTap = true)
             return
         }
         if (action == Quick.VOLUME) {
