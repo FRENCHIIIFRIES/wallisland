@@ -304,7 +304,8 @@ class IslandNotificationListener : NotificationListenerService() {
     private fun isCall(sbn: StatusBarNotification): Boolean {
         val n = sbn.notification ?: return false
         if (sbn.packageName == packageName) return false
-        return n.category == Notification.CATEGORY_CALL && sbn.isOngoing
+        // Ringing calls are sometimes posted without the ongoing flag, but always with a full-screen intent.
+        return n.category == Notification.CATEGORY_CALL && (sbn.isOngoing || n.fullScreenIntent != null)
     }
 
     private fun toCall(sbn: StatusBarNotification): CallInfo {
@@ -315,13 +316,36 @@ class IslandNotificationListener : NotificationListenerService() {
         val usesChrono = extras?.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER) == true
         val start = if (usesChrono && n.`when` > 0) n.`when` else sbn.postTime
         val previous = IslandHub.call
+
+        // Call-style notifications carry their buttons as extras; older ones only as titled actions.
+        @Suppress("DEPRECATION")
+        fun extra(key: String) = extras?.getParcelable<android.os.Parcelable>(key) as? android.app.PendingIntent
+        fun action(re: Regex) = n.actions.orEmpty()
+            .firstOrNull { a -> a.title?.toString()?.let { re.containsMatchIn(it) } == true }?.actionIntent
+        val type = extras?.getInt(EXTRA_CALL_TYPE, 0) ?: 0
+        val answer = extra(EXTRA_ANSWER) ?: action(ANSWER_WORDS)
+        val ringing = type == CALL_TYPE_INCOMING || (type == 0 && answer != null)
+        val hangUp = if (ringing) extra(EXTRA_DECLINE) ?: extra(EXTRA_HANG_UP) ?: action(END_WORDS)
+        else extra(EXTRA_HANG_UP) ?: extra(EXTRA_DECLINE) ?: action(END_WORDS)
+
+        // The timer starts when the call is picked up, not when it started ringing.
+        val sameCall = previous?.key == sbn.key
+        val startedAt = when {
+            usesChrono -> start
+            sameCall && previous!!.ringing && !ringing -> System.currentTimeMillis()
+            sameCall -> previous!!.startedAt
+            else -> start
+        }
         return CallInfo(
             key = sbn.key,
             pkg = sbn.packageName,
             appName = appLabel(this, sbn.packageName),
             name = name,
-            startedAt = if (previous?.key == sbn.key && !usesChrono) previous.startedAt else start,
+            startedAt = startedAt,
             intent = n.contentIntent,
+            ringing = ringing,
+            answer = if (ringing) answer else null,
+            hangUp = hangUp,
         )
     }
 
@@ -423,6 +447,15 @@ class IslandNotificationListener : NotificationListenerService() {
             ?.takeIf { it.isNotBlank() }
 
     companion object {
+        // Notification.CallStyle extras (API 31), read by name so older releases compile against them too.
+        private const val EXTRA_CALL_TYPE = "android.callType"
+        private const val EXTRA_ANSWER = "android.answerIntent"
+        private const val EXTRA_DECLINE = "android.declineIntent"
+        private const val EXTRA_HANG_UP = "android.hangUpIntent"
+        private const val CALL_TYPE_INCOMING = 1
+        private val ANSWER_WORDS = Regex("answer|accept|pick up", RegexOption.IGNORE_CASE)
+        private val END_WORDS = Regex("decline|reject|hang ?up|\\bend\\b|leave|dismiss", RegexOption.IGNORE_CASE)
+
         private val NAV_APPS = setOf(
             "com.google.android.apps.maps", "com.waze", "com.here.app.maps", "net.osmand", "net.osmand.plus",
             "com.sygic.aura", "ru.yandex.yandexnavi",

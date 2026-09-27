@@ -9,6 +9,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.pm.PackageManager
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
@@ -92,7 +93,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_DEMO_NOTICE -> island?.showNotice(demoNotice())
-            ACTION_DEMO_CHARGE -> island?.showCharging(if (batteryLevel >= 0) batteryLevel else 76, true)
+            ACTION_DEMO_CHARGE -> island?.showCharging(if (batteryLevel >= 0) batteryLevel else 76, true, plugIn = true)
             ACTION_DEMO_MEDIA -> demoMedia()
             ACTION_DEMO_CALL -> demoCall()
             ACTION_DEMO_TIMER -> demoLive(LiveInfo.Kind.TIMER)
@@ -111,6 +112,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
     }
 
     override fun onDestroy() {
+        applyPopups(islandShowsNotices = false)
         running = false
         if (current === this) current = null
         if (IslandHub.listener === this) IslandHub.listener = null
@@ -329,6 +331,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         val hideLand = prefs.hideLandscape && landscape
         val hideCap = prefs.hideWhileCapturing && capturing && !inCall()
         island?.setHidden(hideFs || hideLand || hideCap)
+        applyPopups(islandShowsNotices = island != null && prefs.enabled && !(hideFs || hideLand || hideCap))
         val layer = if (windowType == WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY) {
             "above the status bar"
         } else {
@@ -422,6 +425,57 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
 
     override fun openSettings() {
         startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    /** For calls whose notification has no Answer / Hang up button: ask the phone app directly. */
+    @SuppressLint("MissingPermission")
+    override fun callAction(answer: Boolean) {
+        if (Build.VERSION.SDK_INT < 28 ||
+            checkSelfPermission(android.Manifest.permission.ANSWER_PHONE_CALLS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            toast("Allow \"Phone calls\" in Wallisland's Setup to answer and hang up from the island")
+            return
+        }
+        val tm = getSystemService(android.telecom.TelecomManager::class.java) ?: return
+        try {
+            if (answer) tm.acceptRingingCall() else @Suppress("DEPRECATION") tm.endCall()
+        } catch (_: Exception) {
+        }
+    }
+
+    /** Settings changed or the adb grant just arrived: apply the pop-up choice now. */
+    fun refreshPopups() = updateHidden()
+
+    override fun openShade() {
+        val a11y = IslandAccessibilityService.instance
+        if (a11y != null && a11y.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS)) return
+        try {
+            @SuppressLint("WrongConstant")
+            val bar = getSystemService("statusbar") ?: return
+            bar.javaClass.getMethod("expandNotificationsPanel").invoke(bar)
+        } catch (_: Exception) {
+        }
+    }
+
+    /**
+     * With "Island replaces pop-ups" on, the system's own banners are switched off while the island is
+     * there to show notifications, and back on whenever it isn't (hidden, off, or stopped).
+     */
+    private fun applyPopups(islandShowsNotices: Boolean) {
+        if (!canReplacePopups(this)) return
+        val off = prefs.replacePopups && prefs.showNotifications && islandShowsNotices
+        val cr = contentResolver
+        val current = Settings.Global.getInt(cr, HEADS_UP, 1)
+        try {
+            if (off && current != 0) {
+                Settings.Global.putInt(cr, HEADS_UP, 0)
+                prefs.popupsOffByUs = true
+            } else if (!off && prefs.popupsOffByUs) {
+                if (current == 0) Settings.Global.putInt(cr, HEADS_UP, 1)
+                prefs.popupsOffByUs = false
+            }
+        } catch (_: SecurityException) {
+        }
     }
 
     // ---- Quick toggles -------------------------------------------------------------------------------------
@@ -1011,7 +1065,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
                 Intent.ACTION_POWER_CONNECTED -> {
                     charging = true
                     // Give the battery broadcast a beat to report the fresh level.
-                    main.postDelayed({ island?.showCharging(batteryLevel.coerceAtLeast(0), true, chargeTimeMs()) }, 250)
+                    main.postDelayed({ island?.showCharging(batteryLevel.coerceAtLeast(0), true, chargeTimeMs(), plugIn = true) }, 250)
                     // The estimate often isn't ready at plug-in; try once more.
                     main.postDelayed({
                         val t = chargeTimeMs()
@@ -1245,6 +1299,15 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
 
         @Volatile var running = false
             private set
+
+        private const val HEADS_UP = "heads_up_notifications_enabled"
+
+        /** Granted once with adb; lets the island switch the system's pop-up banners off and on. */
+        fun canReplacePopups(ctx: Context) =
+            ctx.checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
+
+        /** Whether the system shows its own pop-up banners right now. */
+        fun systemPopupsOn(ctx: Context) = Settings.Global.getInt(ctx.contentResolver, HEADS_UP, 1) != 0
 
         @Volatile var current: IslandService? = null
             private set

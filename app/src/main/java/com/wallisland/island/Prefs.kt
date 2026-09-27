@@ -30,6 +30,21 @@ class Prefs(context: Context) {
     var dotColor by bool("dot_color", true)
     var autoAlign by bool("auto_align", true)
     var hideWhileCapturing by bool("hide_capturing", true)
+
+    /** Weather beside the time in the double-tap peek, and the rough spot it's for. */
+    var showWeather by bool("show_weather", true)
+    var weatherLat: String
+        get() = sp.getString("weather_lat", "") ?: ""
+        set(v) = sp.edit().putString("weather_lat", v).apply()
+    var weatherLon: String
+        get() = sp.getString("weather_lon", "") ?: ""
+        set(v) = sp.edit().putString("weather_lon", v).apply()
+
+    /** Turn off the system's own pop-up banners while the island shows notifications (needs an adb grant). */
+    var replacePopups by bool("replace_popups", false)
+
+    /** Set while it was the island that turned system pop-ups off, so only it turns them back on. */
+    var popupsOffByUs by bool("popups_off_by_us", false)
     var showLive by bool("show_live", true)
     var showUnlock by bool("show_unlock", true)
     var showBuds by bool("show_buds", true)

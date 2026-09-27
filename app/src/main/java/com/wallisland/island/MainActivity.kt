@@ -86,6 +86,38 @@ class MainActivity : Activity() {
         super.onResume()
         refresh()
         IslandService.start(this)
+        // Android only gives location to the app on screen, so note it now for the island's weather.
+        if (Weather.saveLocation(this)) Weather.refresh(this)
+        IslandService.current?.refreshPopups()
+    }
+
+    private var popupsRow: View? = null
+
+    private fun popupsText(): String = when {
+        !IslandService.canReplacePopups(this) ->
+            "Stops notifications showing twice. Needs a one-time adb command, shown when you switch it on"
+        !prefs.replacePopups -> "Stops notifications showing twice (system banner and island)"
+        IslandService.systemPopupsOn(this) -> "On. System banners come back while the island is hidden"
+        else -> "On: the island is the only pop-up. Banners return while it's hidden"
+    }
+
+    /** The one adb command that lets the island switch the system banners off, with a copy button. */
+    private fun showPopupsGrant() {
+        val cmd = "adb shell pm grant $packageName android.permission.WRITE_SECURE_SETTINGS"
+        android.app.AlertDialog.Builder(this)
+            .setTitle("One command, once")
+            .setMessage(
+                "Android only lets an app turn off other apps' pop-up banners with this permission. With USB " +
+                    "debugging on and your phone plugged in, run:\n\n$cmd\n\nThen come back here. Banners come back " +
+                    "on their own whenever the island is hidden or turned off.",
+            )
+            .setPositiveButton("Copy command") { _, _ ->
+                getSystemService(android.content.ClipboardManager::class.java)
+                    ?.setPrimaryClip(android.content.ClipData.newPlainText("adb", cmd))
+                toast("Copied")
+            }
+            .setNegativeButton("Close", null)
+            .show()
     }
 
     // ---- Sections ----------------------------------------------------------------------------------------
@@ -186,6 +218,18 @@ class MainActivity : Activity() {
             "Calendar", "Optional. Lets the island count down to your next event.",
             granted = { checkSelfPermission(Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED },
         ) { requestPermissions(arrayOf(Manifest.permission.READ_CALENDAR), 3) })
+        card.addView(divider())
+        card.addView(permissionRow(
+            "Location", "Optional. A rough location for the weather in the double-tap peek.",
+            granted = { Weather.hasLocationPermission(this) },
+        ) { requestPermissions(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION), 4) })
+        if (Build.VERSION.SDK_INT >= 28) {
+            card.addView(divider())
+            card.addView(permissionRow(
+                "Phone calls", "Optional. Answer and hang up from the island for calls that don't offer the buttons themselves.",
+                granted = { checkSelfPermission(Manifest.permission.ANSWER_PHONE_CALLS) == PackageManager.PERMISSION_GRANTED },
+            ) { requestPermissions(arrayOf(Manifest.permission.ANSWER_PHONE_CALLS), 5) })
+        }
         col.addView(card)
     }
 
@@ -265,6 +309,16 @@ class MainActivity : Activity() {
         card.addView(toggleRow("Edge light", "Dots race around the island when a notification arrives", prefs.edgeLight) { prefs.edgeLight = it })
         card.addView(divider())
         card.addView(toggleRow("Calendar events", "A countdown 10 minutes before each event", prefs.showEvents) { prefs.showEvents = it })
+        card.addView(divider())
+        card.addView(toggleRow("Weather", "Double-tap the pill: time, battery and the weather", prefs.showWeather) { prefs.showWeather = it })
+        card.addView(divider())
+        popupsRow = toggleRow("Island replaces pop-ups", popupsText(), prefs.replacePopups) { on ->
+            prefs.replacePopups = on
+            if (on && !IslandService.canReplacePopups(this)) showPopupsGrant()
+            IslandService.current?.refreshPopups()
+            refresh()
+        }
+        card.addView(popupsRow)
         card.addView(divider())
         card.addView(toggleRow("Idle pill", "Keep a small pill around the camera when nothing's happening", prefs.showIdle) { prefs.showIdle = it })
         card.addView(divider())
@@ -570,6 +624,9 @@ class MainActivity : Activity() {
         append(" · Accessibility: ").append(if (IslandAccessibilityService.instance != null) "on" else "off")
         append("\nEssential Space app: ").append(prefs.essentialSpacePkg.ifEmpty { "not seen yet" })
         append(" · ").append(IslandAccessibilityService.lastClosed)
+        append("\n\nNOTIFICATIONS & WEATHER\nSystem pop-ups: ").append(if (IslandService.systemPopupsOn(this@MainActivity)) "on" else "off")
+        append(" · island may switch them: ").append(if (IslandService.canReplacePopups(this@MainActivity)) "yes" else "no (adb grant needed)")
+        append("\nWeather: ").append(Weather.log)
         append("\nVolume in island: ").append(if (prefs.volumeInIsland) "on" else "off")
         append(" · last press: ").append(IslandService.lastVolume)
         append("\n\nAndroid ").append(Build.VERSION.RELEASE).append(" · ").append(Build.MANUFACTURER)
@@ -700,6 +757,7 @@ class MainActivity : Activity() {
             !prefs.enabled -> "Turn it on with the switch."
             else -> IslandService.status
         }
+        (((popupsRow as? LinearLayout)?.getChildAt(0) as? LinearLayout)?.getChildAt(1) as? TextView)?.text = popupsText()
         // The service reports back a moment after it starts; check again shortly.
         unlockLogText?.text = IslandHub.unlockLog
         statusDetail.removeCallbacks(refreshLater)

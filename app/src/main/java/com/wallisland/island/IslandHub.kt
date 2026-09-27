@@ -21,6 +21,7 @@ data class Notice(
     val actions: List<NoticeAction> = emptyList(),
     /** The app's notification colour, for the edge light; 0 when it has none. */
     val color: Int = 0,
+    val postedAt: Long = System.currentTimeMillis(),
 )
 
 /** A notification button. [reply] is set when it takes typed input (quick replies use it). */
@@ -35,6 +36,12 @@ data class CallInfo(
     /** Wall-clock start of the call, for the timer. */
     val startedAt: Long,
     val intent: PendingIntent?,
+    /** Still ringing: not answered yet. */
+    val ringing: Boolean = false,
+    /** The call's own Answer button, when it has one. */
+    val answer: PendingIntent? = null,
+    /** The call's own Decline / Hang up button, when it has one. */
+    val hangUp: PendingIntent? = null,
 )
 
 /** An ongoing "live activity" read from a notification: a timer, turn-by-turn navigation, or progress. */
@@ -148,9 +155,17 @@ object IslandHub {
     /** Set by the notification listener so the island can clear an auto-cancel notification it opened. */
     var canceller: ((String) -> Unit)? = null
 
+    /** The last few notifications, newest first, for the swipe-down history. */
+    val history = ArrayList<Notice>()
+
     fun postNotice(notice: Notice) {
+        history.removeAll { it.key == notice.key }
+        history.add(0, notice)
+        while (history.size > HISTORY_SIZE) history.removeAt(history.size - 1)
         listener?.onNotice(notice)
     }
+
+    const val HISTORY_SIZE = 5
 
     fun removeNotice(key: String) {
         listener?.onNoticeRemoved(key)

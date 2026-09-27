@@ -11,7 +11,10 @@ design language: black, white, one red, and dots everywhere.
 | ![Navigation](docs/screens/nav.png) | ![Download](docs/screens/download.png) |
 | ![Earbuds](docs/screens/earbuds.png) | ![Quick toggles](docs/screens/toggles.png) |
 | ![Volume](docs/screens/volume.png) | ![Do Not Disturb](docs/screens/dnd.png) |
-| ![Peek](docs/screens/peek.png) | ![Next event](docs/screens/event.png) |
+| ![Peek with weather](docs/screens/peek.png) | ![Next event](docs/screens/event.png) |
+| ![Incoming call](docs/screens/call-incoming.png) | ![Hang up](docs/screens/call-hangup.png) |
+
+![Recent notifications](docs/screens/history.png)
 
 ![Notification with quick replies and edge light](docs/screens/notification-actions.png)
 
@@ -55,7 +58,16 @@ design language: black, white, one red, and dots everywhere.
   one-tap replies (👍, "On my way") sent straight through the app's Reply.
 - **Edge light.** Two comets of dots race around the island's outline, in the app's colour, when a
   notification arrives.
-- **Peek.** Double-tap the empty pill for the time and battery.
+- **Peek and weather.** Double-tap the empty pill for the time, battery and the weather (from
+  Open-Meteo, for a rough location saved while the app is open; optional location permission).
+- **Calls.** A ringing call opens a card with green Answer and red Decline. Tap an ongoing call's
+  pill for a red hang-up button. Uses the call's own notification buttons; for calls without them,
+  the optional *Phone calls* permission lets the island answer and hang up through Android.
+- **Recent notifications.** Swipe down on the island for your last five notifications; tap one to
+  open it. Swipe down again to pull down the full notification shade.
+- **Island replaces pop-ups.** Stops notifications showing twice (the system banner and the island).
+  Needs a one-time `adb shell pm grant com.wallisland.island android.permission.WRITE_SECURE_SETTINGS`;
+  the system banners come back by themselves whenever the island is hidden or turned off.
 - **Time to full.** While charging, the island alternates the percentage with "FULL 42M".
 - **Focus timer.** A 25-minute timer from the long-press panel, shown as a live countdown.
 - **Next event.** Ten minutes before a calendar event you get a banner, then a countdown
@@ -71,6 +83,7 @@ design language: black, white, one red, and dots everywhere.
 - **Per-app control.** *Apps that can pop up* lets you turn island notifications off app by app.
 - **Accent colour.** Swap the Nothing red for orange, yellow, green, blue, purple, pink or white.
 - **Charging and low battery.** A five-dot gauge and the percentage in Doto. It turns red at 20%.
+  Plugging in sweeps a wave of dots up to the battery level, then a pulse runs along it.
 - **Ring / vibrate / silent.** A short confirmation whenever the ringer mode changes.
 - **Gestures.** Tap to expand or open, swipe up to dismiss, swipe down to expand, swipe music left or
   right to skip, long-press for quick toggles. Tapping outside an expanded island collapses it.

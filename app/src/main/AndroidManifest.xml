@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -18,6 +19,16 @@
     <uses-permission android:name="android.permission.WRITE_SETTINGS" />
     <!-- Next-event heads-up. -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <!-- Answer and hang up from the island, for calls whose notification has no such buttons. -->
+    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
+    <!-- Swipe down twice to pull the notification shade. -->
+    <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
+    <!-- Weather in the double-tap peek: a rough location, read when the settings screen is open. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Granted by the user with adb only: lets the island switch the system pop-up banners off. -->
+    <uses-permission
+        android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
 
     <!-- So app names and icons of launcher apps can be shown next to their notifications. -->
     <queries>
