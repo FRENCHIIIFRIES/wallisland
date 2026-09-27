@@ -173,6 +173,27 @@ install over each other. If you're coming from build 12 or older, uninstall once
 
 Requires Android 8.0 (API 26) or newer.
 
+## Walllock
+
+A separate little app in this repo (`walllock/`): the iPhone's full-screen album cover for the lock
+screen. While music plays, turning the screen off puts a now-playing screen on top of the lock
+screen:
+
+- The cover blurred across the whole screen, with the big clock and date on top.
+- A frosted player card: cover thumbnail, song and artist, a progress bar you can drag to scrub,
+  and previous / play-pause / next.
+- **Tap the cover** and it springs up to fill the top of the screen, melting into its own colour
+  below. Tap it again to shrink it back. It remembers which you left it on.
+- Tap the song title to open the music app, and **swipe up** to unlock as usual (PIN, fingerprint or
+  face). Unlocking with fingerprint or face straight away also closes it.
+- It keeps showing for 10 minutes after you pause (can be turned off).
+
+Download **[Walllock.apk](https://github.com/FRENCHIIIFRIES/wallisland/releases/latest/download/Walllock.apk)**,
+open it and allow **Notification access** (how it sees what's playing), **Notifications** and
+**Full-screen alerts** (Android 14+), and **Display over other apps** (Android 14 and older). Android
+doesn't let apps replace the real lock screen, so Walllock sits on top of it the way alarm and call
+screens do. Build it yourself with `./gradlew :walllock:assembleRelease`.
+
 ## Fonts
 
 [Doto](https://fonts.google.com/specimen/Doto) (dot-matrix) and

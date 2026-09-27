@@ -14,3 +14,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "WallIsland"
 include(":app")
+include(":walllock")

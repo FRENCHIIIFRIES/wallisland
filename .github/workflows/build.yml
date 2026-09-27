@@ -24,13 +24,21 @@ jobs:
       - name: Build debug and release APKs
         run: ./gradlew --no-daemon assembleDebug assembleRelease lintDebug
 
-      - name: Name the APK
-        run: cp app/build/outputs/apk/release/app-release.apk Wallisland.apk
+      - name: Name the APKs
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk Wallisland.apk
+          cp walllock/build/outputs/apk/release/walllock-release.apk Walllock.apk
 
       - uses: actions/upload-artifact@v4
         with:
           name: wallisland-apk
           path: Wallisland.apk
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: walllock-apk
+          path: Walllock.apk
           if-no-files-found: error
 
       # Only the default branch publishes releases, so other branches in the repo can't ship an APK
@@ -44,9 +52,12 @@ jobs:
           name: Wallisland build ${{ github.run_number }}
           target_commitish: ${{ github.sha }}
           make_latest: true
-          files: Wallisland.apk
+          files: |
+            Wallisland.apk
+            Walllock.apk
           body: |
             Tap **Wallisland.apk** below on your phone to download and install it.
+            **Walllock.apk** is the separate full-screen album cover for the lock screen.
             Built from ${{ github.sha }} on ${{ github.ref_name }}.
 
             channel: wallisland-main

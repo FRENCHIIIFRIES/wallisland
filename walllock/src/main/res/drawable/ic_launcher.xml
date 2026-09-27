@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A big album cover with a small padlock. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M54,0a54,54 0,1 1,0 108a54,54 0,1 1,0 -108z" />
+    <path
+        android:fillColor="#FFF2F2F2"
+        android:pathData="M32,26h44a6,6 0,0 1,6 6v44a6,6 0,0 1,-6 6h-44a6,6 0,0 1,-6 -6v-44a6,6 0,0 1,6 -6z" />
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M54,54m-14,0a14,14 0,1 1,28 0a14,14 0,1 1,-28 0" />
+    <path
+        android:fillColor="#FFF2F2F2"
+        android:pathData="M54,54m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0" />
+    <path
+        android:fillColor="#FFD71921"
+        android:pathData="M66,70h12a2,2 0,0 1,2 2v8a2,2 0,0 1,-2 2h-12a2,2 0,0 1,-2 -2v-8a2,2 0,0 1,2 -2z" />
+    <path
+        android:strokeColor="#FFD71921"
+        android:strokeWidth="2.5"
+        android:pathData="M68,70v-4a4,4 0,0 1,8 0v4" />
+</vector>
