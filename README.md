@@ -13,6 +13,9 @@ design language: black, white, one red, and dots everywhere.
 | ![Volume](docs/screens/volume.png) | ![Do Not Disturb](docs/screens/dnd.png) |
 | ![Peek with weather](docs/screens/peek.png) | ![Next event](docs/screens/event.png) |
 | ![Incoming call](docs/screens/call-incoming.png) | ![Hang up](docs/screens/call-hangup.png) |
+| ![Delivery](docs/screens/delivery.png) | ![Ride](docs/screens/ride.png) |
+| ![Timers](docs/screens/timers.png) | ![Brightness](docs/screens/brightness.png) |
+| ![Unlock](docs/screens/unlock.png) | |
 
 ![Recent notifications](docs/screens/history.png)
 
@@ -41,11 +44,21 @@ design language: black, white, one red, and dots everywhere.
 - **Live activities.** Clock-app timers and stopwatches count down beside the camera; Google Maps (and
   other navigation apps) show the next turn and distance; downloads, uploads and updates show a
   filling ring of dots with the percentage.
-- **Unlock.** A dot padlock opens and a tick lands when you unlock the phone.
+- **Unlock.** The dot padlock's shackle lifts and swings open, a ring of dots bursts out and a tick
+  writes itself in, with a little hop of the pill, when you unlock by face, fingerprint or PIN.
 - **Earbuds.** When Bluetooth headphones connect, the island shows their battery (needs the optional
   Nearby devices permission).
-- **Quick toggles.** Long-press the island for five big buttons: torch, ring / vibrate / silent,
-  volume, recent notifications and a focus timer. Swap any for rotation lock in *Quick panel buttons*.
+- **Quick toggles.** Long-press the island for five big buttons: torch, volume, brightness, timers
+  and recent notifications. Swap any for sound mode or rotation lock in *Quick panel buttons*.
+- **Timers and stopwatch.** TIMER opens 1, 5, 10 and 25 minute countdowns and a stopwatch; the
+  running one sits in the pill with a row of dots that drains as it counts down. Tap it to stop.
+- **Brightness.** BRIGHT opens a dot bar to drag, on a perceptual curve (needs "change system
+  settings"; dragging switches adaptive brightness off, like the system slider).
+- **Deliveries and rides.** Uber, Uber Eats, Deliveroo, Just Eat, DoorDash, Swiggy, Zomato, Lyft, Bolt
+  and others: a car or bag, the arrival time ("8-12 MIN", "7:45"), and a dot travelling along the
+  bottom of the pill (real progress when the app reports it).
+- **Battery Saver.** At 15% the island offers Battery Saver in one tap: switched on directly with the
+  same adb grant as pop-ups, otherwise it opens the Battery Saver screen.
 - **Volume in the island.** With *Show above status bar* on, the volume keys drive a dot-matrix
   volume bar in the island instead of the system panel (it falls back to the normal panel while
   the island is hidden or the phone is ringing). Slide sideways on the bar to set the volume by

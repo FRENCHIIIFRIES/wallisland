@@ -10,6 +10,7 @@ import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.pm.PackageManager
+import kotlin.math.roundToInt
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
@@ -87,6 +88,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         registerAudioDevices()
         main.postDelayed(calendarPoll, 3000)
         if (prefs.focusEnd > System.currentTimeMillis()) postFocus(prefs.focusEnd) else prefs.focusEnd = 0
+        if (prefs.stopwatchStart > 0) postStopwatch(prefs.stopwatchStart)
         prefs.sp.registerOnSharedPreferenceChangeListener(this)
         IslandHub.listener = this
     }
@@ -103,6 +105,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
             ACTION_DEMO_UNLOCK -> { IslandHub.unlockLog = "Demo"; island?.showUnlock() }
             ACTION_DEMO_BUDS -> island?.showBuds(78, "Nothing Ear")
             ACTION_DEMO_VOLUME -> openVolumeBar()
+            ACTION_SAVER_ON -> enableSaver()
             ACTION_DEMO_DND -> island?.showStatus(Glyph.MOON, "ON", true)
             ACTION_DEMO_REPLY -> island?.showNotice(demoReplyNotice())
             ACTION_DEMO_EVENT -> { demoLive(LiveInfo.Kind.EVENT); announceEvent("demo:event", "Standup", System.currentTimeMillis() + 10 * 60_000, null) }
@@ -444,6 +447,53 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         }
     }
 
+    // ---- Battery Saver ---------------------------------------------------------------------------------------
+
+    private var saverOffered = false
+
+    /**
+     * Once per discharge, at 15%: a card offering Battery Saver in one tap. Reset by charging or climbing
+     * back above 20%.
+     */
+    private fun offerSaver(pct: Int) {
+        if (charging || pct > 20) {
+            saverOffered = false
+            return
+        }
+        if (saverOffered || pct < 0 || pct > SAVER_AT) return
+        val pm = getSystemService(android.os.PowerManager::class.java)
+        if (pm?.isPowerSaveMode == true) return
+        saverOffered = true
+        val on = PendingIntent.getService(
+            this, 7, Intent(this, IslandService::class.java).setAction(ACTION_SAVER_ON),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        island?.showNotice(
+            Notice(
+                key = "saver:${SystemClock.uptimeMillis()}", pkg = packageName, appName = "Battery",
+                title = "$pct% left", text = "Turn on Battery Saver to make it last longer",
+                icon = getDrawable(R.drawable.ic_stat_island), avatar = null, intent = on, autoCancel = false,
+                actions = listOf(NoticeAction("Saver on", on, null)), color = Look.RED,
+            ),
+        )
+    }
+
+    /** Battery Saver on: directly with the adb grant (same one as pop-ups), else via its settings screen. */
+    private fun enableSaver() {
+        if (canReplacePopups(this)) {
+            try {
+                Settings.Global.putInt(contentResolver, "low_power", 1)
+                island?.showStatus(Glyph.BOLT, "SAVER ON", true)
+                return
+            } catch (_: Exception) {
+            }
+        }
+        try {
+            startActivity(Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (_: Exception) {
+        }
+    }
+
     /** Settings changed or the adb grant just arrived: apply the pop-up choice now. */
     fun refreshPopups() = updateHidden()
 
@@ -515,7 +565,73 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
             ringerMode = am?.ringerMode ?: AudioManager.RINGER_MODE_NORMAL,
             autoRotate = autoRotate(),
             focusOn = prefs.focusEnd > System.currentTimeMillis(),
+            stopwatchOn = prefs.stopwatchStart > 0,
         )
+    }
+
+    /** 0..100 on a perceptual curve, so the middle of the bar looks like half brightness. */
+    override fun setBrightness(level: Int): Int {
+        if (!Settings.System.canWrite(this)) {
+            toast("Allow Wallisland to change system settings, then try again")
+            startActivity(
+                Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, android.net.Uri.parse("package:$packageName"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+            return -1
+        }
+        val raw = (255.0 * Math.pow(level.coerceIn(0, 100) / 100.0, 2.2)).toInt().coerceIn(1, 255)
+        try {
+            // Dragging takes over from adaptive brightness, as the system slider does.
+            Settings.System.putInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL)
+            Settings.System.putInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS, raw)
+        } catch (_: Exception) {
+        }
+        return level.coerceIn(0, 100)
+    }
+
+    private fun brightnessLevel(): Int {
+        val raw = Settings.System.getInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS, 128).coerceIn(0, 255)
+        return (100 * Math.pow(raw / 255.0, 1 / 2.2)).roundToInt().coerceIn(0, 100)
+    }
+
+    override fun startTimer(ms: Long) {
+        stopStopwatch(announce = false)
+        val end = System.currentTimeMillis() + ms
+        prefs.focusEnd = end
+        prefs.timerTotal = ms
+        postFocus(end)
+    }
+
+    override fun startStopwatch() {
+        if (prefs.focusEnd > System.currentTimeMillis()) stopFocus()
+        prefs.stopwatchStart = System.currentTimeMillis()
+        postStopwatch(prefs.stopwatchStart)
+    }
+
+    override fun stopTimers() {
+        if (prefs.focusEnd > System.currentTimeMillis()) stopFocus()
+        stopStopwatch(announce = true)
+    }
+
+    private fun postStopwatch(start: Long) {
+        IslandHub.putLive(
+            LiveInfo(
+                key = STOPWATCH_KEY, kind = LiveInfo.Kind.TIMER, pkg = packageName, appName = "Stopwatch", title = "Stopwatch",
+                text = "", icon = null, chronoBase = start, countDown = false, staticTime = null, progress = 0,
+                progressMax = 0, indeterminate = false, postedAt = System.currentTimeMillis(), intent = null,
+            )
+        )
+    }
+
+    private fun stopStopwatch(announce: Boolean) {
+        val start = prefs.stopwatchStart
+        if (start <= 0) return
+        prefs.stopwatchStart = 0
+        IslandHub.removeLive(STOPWATCH_KEY)
+        if (announce) {
+            val s = ((System.currentTimeMillis() - start) / 1000).coerceAtLeast(0)
+            island?.showStatus(Glyph.TIMER, "%d:%02d".format(s / 60, s % 60), true)
+        }
     }
 
     override fun batteryLevel(): Int = batteryLevel
@@ -658,18 +774,16 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         island?.refreshQuick()
     }
 
-    private fun startFocus() {
-        val end = System.currentTimeMillis() + FOCUS_MS
-        prefs.focusEnd = end
-        postFocus(end)
-    }
+    private fun startFocus() = startTimer(FOCUS_MS)
 
     private fun postFocus(end: Long) {
         IslandHub.putLive(
             LiveInfo(
-                key = FOCUS_KEY, kind = LiveInfo.Kind.TIMER, pkg = packageName, appName = "Focus", title = "Focus",
+                key = FOCUS_KEY, kind = LiveInfo.Kind.TIMER, pkg = packageName, appName = "Timer", title = "Timer",
                 text = "", icon = null, chronoBase = end, countDown = true, staticTime = null, progress = 0,
-                progressMax = 0, indeterminate = false, postedAt = System.currentTimeMillis(), intent = null,
+                // Total seconds, so the island can drain its row of dots.
+                progressMax = (prefs.timerTotal.takeIf { it > 0 } ?: FOCUS_MS).div(1000).toInt(),
+                indeterminate = false, postedAt = System.currentTimeMillis(), intent = null,
             )
         )
         main.removeCallbacks(focusDone)
@@ -807,8 +921,13 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
                 }
                 Settings.System.putInt(contentResolver, Settings.System.ACCELEROMETER_ROTATION, if (autoRotate()) 0 else 1)
             }
-            IslandView.Quick.FOCUS -> toggleFocus()
             IslandView.Quick.VOLUME -> openVolumeBar()
+            IslandView.Quick.BRIGHTNESS -> if (Settings.System.canWrite(this)) {
+                island?.showBrightness(brightnessLevel())
+            } else {
+                setBrightness(0)
+            }
+            IslandView.Quick.TIMER -> Unit // the island opens its timer panel itself
             IslandView.Quick.RECENT -> Unit // handled by the island itself
         }
         island?.refreshQuick()
@@ -1087,6 +1206,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
                     if (!isInitialStickyBroadcast && !charging && prev > pct && (pct == 20 || pct == 10 || pct == 5)) {
                         island?.showCharging(pct, false)
                     }
+                    offerSaver(pct)
                 }
                 AudioManager.RINGER_MODE_CHANGED_ACTION -> {
                     if (isInitialStickyBroadcast) return
@@ -1204,6 +1324,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
                 LiveInfo.Kind.TIMER -> "Timer"
                 LiveInfo.Kind.PROGRESS -> "Downloading"
                 LiveInfo.Kind.EVENT -> "Standup"
+                LiveInfo.Kind.DELIVERY -> "8 MIN"
             },
             text = "", icon = null,
             chronoBase = when (kind) {
@@ -1212,7 +1333,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
                 else -> 0L
             },
             countDown = true,
-            staticTime = null, progress = 43, progressMax = 100, indeterminate = false,
+            staticTime = null, progress = 43, progressMax = if (kind == LiveInfo.Kind.TIMER) 600 else 100, indeterminate = false,
             postedAt = now, intent = null,
         )
         island?.setLive(listOf(demo))
@@ -1282,6 +1403,9 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
             private set
 
         private const val FOCUS_KEY = "focus"
+        private const val STOPWATCH_KEY = "stopwatch"
+        const val ACTION_SAVER_ON = "com.wallisland.island.SAVER_ON"
+        private const val SAVER_AT = 15
         private const val FOCUS_MS = 25 * 60_000L
         private const val EVENT_BEFORE_MS = 10 * 60_000L
         private const val EVENT_AFTER_MS = 5 * 60_000L

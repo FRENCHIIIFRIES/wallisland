@@ -51,6 +51,14 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
 
         /** Pulls down the notification shade. */
         fun openShade()
+
+        /** Sets screen brightness (0..100, perceptual) and returns where it ended up; -1 without permission. */
+        fun setBrightness(level: Int): Int
+
+        /** The island's own timers: a countdown of [ms], a stopwatch, or stop whichever is running. */
+        fun startTimer(ms: Long)
+        fun startStopwatch()
+        fun stopTimers()
     }
 
     data class QuickState(
@@ -58,26 +66,31 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         val torchAvailable: Boolean,
         val ringerMode: Int,
         val autoRotate: Boolean,
+        /** The island's own countdown is running. */
         val focusOn: Boolean = false,
+        val stopwatchOn: Boolean = false,
     )
 
     enum class Quick(val title: String) {
-        TORCH("Torch"), RINGER("Sound mode"), VOLUME("Volume"), RECENT("Recent notifications"),
-        ROTATE("Rotation lock"), FOCUS("Focus timer");
+        TORCH("Torch"), RINGER("Sound mode"), VOLUME("Volume"), BRIGHTNESS("Brightness"), TIMER("Timers and stopwatch"),
+        RECENT("Recent notifications"), ROTATE("Rotation lock");
 
         companion object {
             const val MAX = 5
-            val DEFAULT = listOf(TORCH, RINGER, VOLUME, RECENT, FOCUS)
+            val DEFAULT = listOf(TORCH, VOLUME, BRIGHTNESS, TIMER, RECENT)
 
             fun parse(csv: String): List<Quick> =
-                csv.split(',').mapNotNull { n -> values().firstOrNull { it.name == n.trim() } }.distinct().take(MAX)
-                    .ifEmpty { DEFAULT }
+                csv.split(',').mapNotNull { raw ->
+                    // The old focus button became the timer panel.
+                    val n = raw.trim().let { if (it == "FOCUS") "TIMER" else it }
+                    values().firstOrNull { it.name == n }
+                }.distinct().take(MAX).ifEmpty { DEFAULT }
         }
     }
 
     private enum class Mode {
         IDLE, CALL, CALL_CARD, LIVE, MEDIA, MEDIA_EXPANDED, NOTICE, CHARGING, RINGER, UNLOCK, BUDS, TOGGLES, VOLUME,
-        STATUS, PEEK, HISTORY,
+        STATUS, PEEK, HISTORY, TIMERS,
     }
 
     private sealed class Transient {
@@ -90,7 +103,11 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         data class RingerT(val mode: Int) : Transient()
         data class UnlockT(val startedAt: Long) : Transient()
         data class BudsT(val battery: Int, val name: String?) : Transient()
-        data class VolumeT(val level: Int, val max: Int, val stream: Int = AudioManager.STREAM_MUSIC) : Transient()
+        data class VolumeT(
+            val level: Int, val max: Int, val stream: Int = AudioManager.STREAM_MUSIC,
+            /** The same bar, driving screen brightness instead (level 0..100). */
+            val brightness: Boolean = false,
+        ) : Transient()
 
         /** A one-line confirmation: a glyph and a word (DND ON, WI-FI OFF, SENT, DONE…). */
         data class StatusT(val glyph: Glyph, val label: String, val lit: Boolean) : Transient()
@@ -116,6 +133,11 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
     private val historyIcons = HashMap<String, PictureArt?>()
     private val hitHistory = Array(IslandHub.HISTORY_SIZE) { RectF() }
     private val historyTimeout = Runnable { closeHistory() }
+
+    /** The timer panel: 1, 5, 10, 25 minutes and a stopwatch (or Stop while one runs). */
+    private var timersOpen = false
+    private val hitTimer = Array(TIMER_CHOICES.size + 1) { RectF() }
+    private val timersTimeout = Runnable { closeTimers() }
     private var live: List<LiveInfo> = emptyList()
     private val liveDismissed = HashSet<String>()
     private var togglesOpen = false
@@ -295,7 +317,10 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         unlockRequestedAt = 0L
         handler.removeCallbacks(unlockGaveUp)
         IslandHub.unlockLog += ": played"
-        showTransient(Transient.UnlockT(now), 1500)
+        showTransient(Transient.UnlockT(now), 1700)
+        // A little hop as the lock springs open.
+        handler.postDelayed({ springScale.target = 1.07f; kick() }, 380)
+        handler.postDelayed({ springScale.target = 1f; kick() }, 520)
     }
     private val tryUnlockAgain: Runnable = Runnable { tryUnlock.run() }
 
@@ -388,6 +413,14 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
 
     /** True when a transient (volume, confirmations) would actually be seen right now. */
     fun canShowTransient() = prefs.enabled && !hidden && screenOn
+
+    /** The brightness bar (0..100), opened from the quick panel and dragged like the volume bar. */
+    fun showBrightness(level: Int) {
+        if (!canShowTransient() || volumeDragging) return
+        val fill = level / 100f
+        if (transient !is Transient.VolumeT) springVolume.snap(fill) else springVolume.target = fill
+        showTransient(Transient.VolumeT(level, 100, brightness = true), VOLUME_LINGER_MS)
+    }
 
     /** The volume bar; [linger] longer when it was opened by touch, so there's time to drag it. */
     fun showVolume(level: Int, max: Int, stream: Int = AudioManager.STREAM_MUSIC, linger: Boolean = false) {
@@ -515,6 +548,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             t is Transient.StatusT -> Mode.STATUS
             t is Transient.PeekT -> Mode.PEEK
             historyOpen -> Mode.HISTORY
+            timersOpen -> Mode.TIMERS
             togglesOpen -> Mode.TOGGLES
             mediaExpanded && mediaVisible() -> Mode.MEDIA_EXPANDED
             c != null -> if (callExpanded) Mode.CALL_CARD else Mode.CALL
@@ -536,7 +570,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             Mode.IDLE -> idleW to idleH
             Mode.MEDIA, Mode.CHARGING, Mode.RINGER, Mode.CALL, Mode.LIVE, Mode.UNLOCK, Mode.BUDS, Mode.STATUS, Mode.PEEK ->
                 idleW + 2 * context.dp(SIDE_DP) to idleH
-            Mode.TOGGLES -> bigW to idleH + context.dp(84f)
+            Mode.TOGGLES, Mode.TIMERS -> bigW to idleH + context.dp(84f)
             Mode.NOTICE -> bigW to idleH + noticeExtra.roundToInt() + context.dp(
                 if ((t as? Transient.NoticeT)?.notice?.actions?.isNotEmpty() == true) 104f else 60f,
             )
@@ -566,6 +600,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             // Volume steps update in place rather than cross-fading on every press.
             Mode.VOLUME -> Mode.VOLUME
             Mode.TOGGLES -> Mode.TOGGLES
+            Mode.TIMERS -> Mode.TIMERS
             Mode.IDLE -> Mode.IDLE
         }
         if (mode != pendingMode || token != pendingToken) {
@@ -632,7 +667,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         ((shownMode == Mode.MEDIA || shownMode == Mode.MEDIA_EXPANDED) && media?.playing == true) ||
             shownMode == Mode.CALL || shownMode == Mode.CALL_CARD || shownMode == Mode.UNLOCK || shownMode == Mode.CHARGING || shownMode == Mode.PEEK ||
             (shownMode == Mode.LIVE && currentLive()?.let {
-                it.kind == LiveInfo.Kind.TIMER || it.kind == LiveInfo.Kind.EVENT || it.indeterminate
+                it.kind == LiveInfo.Kind.TIMER || it.kind == LiveInfo.Kind.DELIVERY || it.kind == LiveInfo.Kind.EVENT || it.indeterminate
             } == true)
         )
 
@@ -721,6 +756,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             Mode.UNLOCK -> (shownTransient as? Transient.UnlockT)?.let { drawUnlock(canvas, it, alpha) }
             Mode.BUDS -> (shownTransient as? Transient.BudsT)?.let { drawBuds(canvas, it.battery, it.name, alpha) }
             Mode.TOGGLES -> drawToggles(canvas, alpha)
+            Mode.TIMERS -> drawTimers(canvas, alpha)
             Mode.VOLUME -> (shownTransient as? Transient.VolumeT)?.let { drawVolume(canvas, it, alpha) }
             Mode.STATUS -> (shownTransient as? Transient.StatusT)?.let { drawStatus(canvas, it, alpha) }
             Mode.PEEK -> drawPeek(canvas, alpha)
@@ -1277,6 +1313,21 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
                 glyphPaint.color = Look.accent; glyphPaint.alpha = alpha
                 Glyph.TIMER.draw(canvas, x, cy, gs, glyphPaint)
                 drawRightText(canvas, l.timeText() ?: l.title.ifEmpty { "ON" }, Look.WHITE, alpha)
+                // The island's own countdown drains a row of dots along the bottom of the pill.
+                if (l.pkg == context.packageName && l.countDown && l.progressMax > 0) {
+                    val left = (l.chronoBase - System.currentTimeMillis()).coerceAtLeast(0) / 1000f
+                    drawBottomDots(canvas, (left / l.progressMax).coerceIn(0f, 1f), moving = false, alpha = alpha)
+                }
+            }
+            LiveInfo.Kind.DELIVERY -> {
+                val ride = l.pkg in IslandNotificationListener.RIDE_APPS &&
+                    !Regex("order|food|deliver|courier|parcel|package", RegexOption.IGNORE_CASE).containsMatchIn(l.text + l.title)
+                val g = if (ride) Glyph.CAR else Glyph.BAG
+                glyphPaint.color = Look.accent; glyphPaint.alpha = alpha
+                g.draw(canvas, x, cy, gs, glyphPaint)
+                drawRightText(canvas, l.title.ifEmpty { l.appName }.uppercase(), Look.WHITE, alpha)
+                // On its way: progress when the app reports it, else a dot travelling along the route.
+                drawBottomDots(canvas, if (l.progressMax > 0) l.percent / 100f else -1f, moving = true, alpha = alpha)
             }
             LiveInfo.Kind.EVENT -> {
                 glyphPaint.color = Look.accent; glyphPaint.alpha = alpha
@@ -1306,20 +1357,170 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         }
     }
 
-    /** Unlocked: the padlock opens, then a tick lands on the right. */
+    /**
+     * A thin row of dots along the bottom of the compact pill. [fraction] of it is lit; with [moving], the
+     * lit end is a bright "vehicle" dot, and with no known fraction (< 0) it travels back and forth.
+     */
+    private fun drawBottomDots(canvas: Canvas, fraction: Float, moving: Boolean, alpha: Int) {
+        val y = pillRect.bottom - context.dp(4.5f)
+        val left = pillRect.left + context.dp(18f)
+        val right = pillRect.right - context.dp(18f)
+        val n = 24
+        val step = (right - left) / (n - 1)
+        val headAt = if (fraction >= 0f) {
+            fraction * (n - 1)
+        } else {
+            val t = (SystemClock.uptimeMillis() % 2400) / 2400f
+            (if (t < 0.5f) t * 2 else 2 - t * 2) * (n - 1)
+        }
+        for (i in 0 until n) {
+            val on = if (fraction >= 0f) i <= headAt else abs(i - headAt) < 1.5f
+            val head = moving && abs(i - headAt) < 0.75f
+            dotPaint.color = when {
+                head -> Look.accent
+                on && fraction >= 0f -> Look.WHITE
+                on -> Look.GREY
+                else -> Look.DOT_OFF
+            }
+            dotPaint.alpha = if (on && !head && fraction >= 0f) (alpha * 0.8f).roundToInt() else alpha
+            canvas.drawCircle(left + i * step, y, context.dp(if (head) 1.8f else 1.1f), dotPaint)
+        }
+    }
+
+    /**
+     * Unlocked, in dots: the shackle lifts and swings open on its left leg, a ring of dots bursts out of the
+     * lock, and a tick draws itself in on the right.
+     */
     private fun drawUnlock(canvas: Canvas, t: Transient.UnlockT, alpha: Int) {
         val cy = pillRect.top + topZone / 2f
-        val gs = compactSize(15f)
-        val el = SystemClock.uptimeMillis() - t.startedAt
-        glyphPaint.color = Look.WHITE
-        glyphPaint.alpha = alpha
-        (if (el < 380) Glyph.LOCK else Glyph.UNLOCK).draw(canvas, leftSlotStart(), cy, gs, glyphPaint)
-        val tick = ((el - 380) / 220f).coerceIn(0f, 1f)
+        val gs = compactSize(16f)
+        val el = (SystemClock.uptimeMillis() - t.startedAt).toFloat()
+        val pitch = gs / 7f
+        val r = pitch * 0.42f
+        val x0 = leftSlotStart()
+        val cx = x0 + pitch * 2.5f
+        // Body: 5 x 3 dots in the lower half.
+        dotPaint.color = Look.WHITE
+        dotPaint.alpha = alpha
+        val bodyTop = cy + pitch * 0.5f
+        for (row in 0 until 3) for (col in 0 until 5) {
+            canvas.drawCircle(x0 + pitch * (col + 0.5f), bodyTop + pitch * row, r, dotPaint)
+        }
+        // Shackle: an arch of dots above the body that rises, then swings open around its left leg.
+        val lift = ease(((el - 120f) / 200f).coerceIn(0f, 1f)) * pitch * 1.2f
+        val swing = ease(((el - 260f) / 220f).coerceIn(0f, 1f)) * -38f
+        val pivotX = x0 + pitch * 0.5f
+        val pivotY = bodyTop - pitch * 0.5f - lift
+        val arch = listOf(0f to 0f, 0f to -1f, 0f to -2f, 1f to -3f, 2f to -3.3f, 3f to -3f, 4f to -2f, 4f to -1f, 4f to 0f)
+        canvas.save()
+        canvas.rotate(swing, pivotX, pivotY)
+        for ((dx, dy) in arch) canvas.drawCircle(pivotX + dx * pitch, pivotY + dy * pitch * 0.9f, r, dotPaint)
+        canvas.restore()
+        // Burst: eight dots fly out of the lock and fade.
+        val burst = ((el - 380f) / 420f).coerceIn(0f, 1f)
+        if (burst > 0f && burst < 1f) {
+            dotPaint.color = Look.accent
+            dotPaint.alpha = (alpha * (1f - burst)).roundToInt()
+            val rad = gs * (0.4f + 0.9f * ease(burst))
+            for (i in 0 until 8) {
+                val a = Math.PI * 2 * i / 8
+                canvas.drawCircle(cx + (rad * kotlin.math.cos(a)).toFloat(), cy + (rad * kotlin.math.sin(a)).toFloat(), r * 1.1f, dotPaint)
+            }
+        }
+        // The tick writes itself in, dot by dot.
+        val tick = ((el - 420f) / 300f).coerceIn(0f, 1f)
         if (tick > 0f) {
             glyphPaint.color = Look.accent
             glyphPaint.alpha = (alpha * tick).roundToInt()
-            Glyph.CHECK.draw(canvas, rightSlotEnd() - Glyph.CHECK.width(gs), cy, gs, glyphPaint)
+            val cw = Glyph.CHECK.width(gs)
+            canvas.save()
+            canvas.clipRect(rightSlotEnd() - cw, pillRect.top, rightSlotEnd() - cw + cw * tick, pillRect.bottom)
+            Glyph.CHECK.draw(canvas, rightSlotEnd() - cw, cy, gs, glyphPaint)
+            canvas.restore()
         }
+    }
+
+    private fun ease(t: Float) = 1f - (1f - t) * (1f - t) * (1f - t)
+
+    // ---- Timers --------------------------------------------------------------------------------------------
+
+    private fun openTimers() {
+        timersOpen = true
+        togglesOpen = false
+        historyOpen = false
+        mediaExpanded = false
+        buzz()
+        handler.removeCallbacks(timersTimeout)
+        handler.postDelayed(timersTimeout, 6000)
+        resolve()
+    }
+
+    private fun closeTimers() {
+        handler.removeCallbacks(timersTimeout)
+        if (!timersOpen) return
+        timersOpen = false
+        resolve()
+    }
+
+    /** Four countdowns and a stopwatch as round buttons; while one runs, the last button is a red Stop. */
+    private fun drawTimers(canvas: Canvas, alpha: Int) {
+        val q = host.quickState()
+        val running = q.focusOn || q.stopwatchOn
+        drawHeader(canvas, "Timer", if (running) "RUNNING" else null, alpha)
+        val cy = pillRect.top + topZone + context.dp(26f)
+        val count = TIMER_CHOICES.size + 1
+        val inset = context.dp(14f)
+        val step = (pillRect.width() - inset * 2) / count
+        val r = min(context.dp(22f), step / 2f - context.dp(8f))
+        labelPaint.alpha = alpha
+        for (i in 0 until count) {
+            val cx = pillRect.left + inset + step * (i + 0.5f)
+            val last = i == count - 1
+            val label: String
+            if (!last) {
+                dotPaint.color = Look.RAISED; dotPaint.alpha = alpha
+                canvas.drawCircle(cx, cy, r, dotPaint)
+                val num = "${TIMER_CHOICES[i]}"
+                val size = bigDotPaint.textSize
+                bigDotPaint.textSize = min(size, r * 1.05f)
+                bigDotPaint.color = Look.WHITE; bigDotPaint.alpha = alpha
+                val w = bigDotPaint.measureText(num)
+                drawText(canvas, num, cx - w / 2f, cy, w + 1f, bigDotPaint, centerY = true)
+                bigDotPaint.textSize = size
+                label = "MIN"
+            } else {
+                dotPaint.color = if (running) Look.RED else Look.RAISED; dotPaint.alpha = alpha
+                canvas.drawCircle(cx, cy, r, dotPaint)
+                glyphPaint.color = Look.WHITE; glyphPaint.alpha = alpha
+                val gs = context.dp(15f)
+                val g = if (running) Glyph.PAUSE else Glyph.TIMER
+                g.draw(canvas, cx - g.width(gs) / 2f, cy, gs, glyphPaint)
+                label = if (running) "STOP" else "STOPWATCH"
+            }
+            val base = labelPaint.textSize
+            val room = step - context.dp(4f)
+            if (labelPaint.measureText(label) > room) labelPaint.textSize = base * room / labelPaint.measureText(label)
+            val lw = labelPaint.measureText(label)
+            drawText(canvas, label, cx - lw / 2f, cy + r + context.dp(12f), lw + 1f, labelPaint, centerY = true)
+            labelPaint.textSize = base
+            hitTimer[i].set(cx - step / 2f, cy - r - context.dp(6f), cx + step / 2f, cy + r + context.dp(20f))
+        }
+    }
+
+    private fun tapTimers(x: Float, y: Float) {
+        val i = hitTimer.indexOfFirst { it.contains(x, y) }
+        if (i < 0) {
+            closeTimers()
+            return
+        }
+        buzz()
+        val q = host.quickState()
+        when {
+            i < TIMER_CHOICES.size -> host.startTimer(TIMER_CHOICES[i] * 60_000L)
+            q.focusOn || q.stopwatchOn -> host.stopTimers()
+            else -> host.startStopwatch()
+        }
+        closeTimers()
     }
 
     /** Earbuds connected: headphones on the left, their battery on the right. */
@@ -1359,7 +1560,8 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
                 Quick.VOLUME -> Triple(Glyph.SPEAKER, "VOLUME", false)
                 Quick.RECENT -> Triple(Glyph.LIST, "RECENT", false)
                 Quick.ROTATE -> Triple(Glyph.ROTATE, if (q.autoRotate) "ROTATE" else "LOCKED", q.autoRotate)
-                Quick.FOCUS -> Triple(Glyph.TIMER, if (q.focusOn) "STOP" else "FOCUS", q.focusOn)
+                Quick.BRIGHTNESS -> Triple(Glyph.SUN, "BRIGHT", false)
+                Quick.TIMER -> Triple(Glyph.TIMER, "TIMER", q.focusOn || q.stopwatchOn)
             }
             val dim = buttons[i] == Quick.TORCH && !q.torchAvailable
             dotPaint.color = if (active) Look.WHITE else Look.RAISED
@@ -1552,6 +1754,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             if (mediaExpanded) { mediaExpanded = false; resolve() }
             if (callExpanded) { callExpanded = false; resolve() }
             closeHistory()
+            closeTimers()
             closeToggles()
             return false
         }
@@ -1600,8 +1803,15 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
                 endTransient()
             }
             Mode.CHARGING, Mode.RINGER, Mode.UNLOCK, Mode.BUDS, Mode.VOLUME, Mode.STATUS, Mode.PEEK -> endTransient()
-            Mode.LIVE -> { currentLive()?.intent?.let { send(it) }; buzz() }
+            Mode.LIVE -> {
+                val l = currentLive()
+                buzz()
+                // The island's own timer or stopwatch: open the panel to stop or change it.
+                if (l != null && l.pkg == context.packageName && l.kind == LiveInfo.Kind.TIMER) openTimers()
+                else l?.intent?.let { send(it) }
+            }
             Mode.TOGGLES -> tapToggles(x, y)
+            Mode.TIMERS -> tapTimers(x, y)
         }
     }
 
@@ -1620,7 +1830,12 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             openHistory(fromTap = true)
             return
         }
-        if (action == Quick.VOLUME) {
+        if (action == Quick.TIMER) {
+            closeToggles()
+            openTimers()
+            return
+        }
+        if (action == Quick.VOLUME || action == Quick.BRIGHTNESS) {
             // Swap the panel for the volume bar, ready to drag.
             closeToggles()
             host.quickAction(action)
@@ -1735,7 +1950,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         val span = (pillRect.width() - context.dp(40f)).coerceAtLeast(1f)
         val want = (volumeStart + (x - volumeDownX) / span * v.max).roundToInt().coerceIn(0, v.max)
         if (want == v.level) return
-        val got = host.setVolume(v.stream, want)
+        val got = if (v.brightness) host.setBrightness(want).let { if (it < 0) return else it } else host.setVolume(v.stream, want)
         if (got == v.level) return
         buzz()
         val next = v.copy(level = got)
@@ -1823,6 +2038,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
                 endTransient(); return
             }
             Mode.TOGGLES -> { closeToggles(); return }
+            Mode.TIMERS -> { closeTimers(); return }
             Mode.IDLE -> Unit
         }
         resolve()
@@ -2004,7 +2220,12 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         val pct = if (v.max > 0) v.level * 100 / v.max else 0
         glyphPaint.color = Look.WHITE
         glyphPaint.alpha = alpha
-        (if (v.level == 0) Glyph.MUTE else Glyph.SPEAKER).draw(canvas, leftSlotStart(), cy, compactSize(14f), glyphPaint)
+        val icon = when {
+            v.brightness -> Glyph.SUN
+            v.level == 0 -> Glyph.MUTE
+            else -> Glyph.SPEAKER
+        }
+        icon.draw(canvas, leftSlotStart(), cy, compactSize(14f), glyphPaint)
         drawRightText(canvas, "$pct%", Look.WHITE, alpha)
         // A row of dots under the camera line, filling left to right and gliding between levels. The lit
         // end is the accent colour, and swells while it's being dragged.
@@ -2096,6 +2317,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
     companion object {
         private const val SKIP_MS = 10_000L
         private const val CALL_CARD_MS = 6_000L
+        private val TIMER_CHOICES = intArrayOf(1, 5, 10, 25)
         private const val HISTORY_MS = 8_000L
         private const val HISTORY_ROW_DP = 46f
         private val ANSWER_GREEN = 0xFF2BD16B.toInt()

@@ -31,6 +31,10 @@ class Prefs(context: Context) {
     var autoAlign by bool("auto_align", true)
     var hideWhileCapturing by bool("hide_capturing", true)
 
+    /** The island's own countdown length (ms, for its draining dots) and stopwatch start (wall clock, 0 = off). */
+    var timerTotal by long("timer_total", 0L)
+    var stopwatchStart by long("stopwatch_start", 0L)
+
     /** The long-press panel's buttons, in order (names of IslandView.Quick), five at most. */
     var quickButtons: String
         get() = sp.getString("quick_buttons", null) ?: IslandView.Quick.DEFAULT.joinToString(",") { it.name }
@@ -121,6 +125,13 @@ class Prefs(context: Context) {
 
     /** How long a notification stays open, in seconds. */
     var noticeSeconds by int("notice_seconds", DEFAULT_NOTICE_SECONDS)
+
+    private fun long(key: String, def: Long) = object : kotlin.properties.ReadWriteProperty<Any?, Long> {
+        override fun getValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>) = sp.getLong(key, def)
+        override fun setValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>, value: Long) {
+            sp.edit().putLong(key, value).apply()
+        }
+    }
 
     private fun bool(key: String, def: Boolean) = object : kotlin.properties.ReadWriteProperty<Any?, Boolean> {
         override fun getValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>) = sp.getBoolean(key, def)

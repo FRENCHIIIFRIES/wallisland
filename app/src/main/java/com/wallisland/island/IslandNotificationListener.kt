@@ -236,6 +236,9 @@ class IslandNotificationListener : NotificationListenerService() {
         if (n.category == Notification.CATEGORY_CALL) return null
         val f = facts(sbn) ?: return null
         val navApp = pkg in NAV_APPS || n.category == "navigation"
+        val deliveryApp = pkg in DELIVERY_APPS || pkg in RIDE_APPS
+        // Order and ride tracking: ongoing, or at least showing progress (promotions are neither).
+        if (deliveryApp && (f.persistent || f.progressMax > 0)) return LiveInfo.Kind.DELIVERY to f
         if (!f.persistent && !navApp) return null
         val kind = when {
             navApp -> LiveInfo.Kind.NAV
@@ -275,10 +278,11 @@ class IslandNotificationListener : NotificationListenerService() {
             else -> 0L to false
         }
         // Navigation: show just the distance ("200 m", "0.3 mi") when there is one.
-        val headline = if (kind == LiveInfo.Kind.NAV) {
-            DISTANCE.find(title)?.value ?: DISTANCE.find(text)?.value ?: title.ifEmpty { text }
-        } else {
-            title
+        val headline = when (kind) {
+            LiveInfo.Kind.NAV -> DISTANCE.find(title)?.value ?: DISTANCE.find(text)?.value ?: title.ifEmpty { text }
+            // Deliveries and rides: the arrival ("8 MIN", "8-12 MIN", "7:45"), else the status line.
+            LiveInfo.Kind.DELIVERY -> eta(title) ?: eta(text) ?: title.ifEmpty { text }
+            else -> title
         }
         return LiveInfo(
             key = sbn.key,
@@ -297,6 +301,15 @@ class IslandNotificationListener : NotificationListenerService() {
             postedAt = sbn.postTime,
             intent = n.contentIntent,
         )
+    }
+
+    private fun eta(s: String): String? {
+        MINUTES.find(s)?.let { m ->
+            val a = m.groupValues[1]
+            val b = m.groupValues[2]
+            return if (b.isNotEmpty()) "$a-$b MIN" else "$a MIN"
+        }
+        return CLOCK_TIME.find(s)?.value?.uppercase()
     }
 
     /** One line per persistent notification: what we read from it and what we decided. For Troubleshoot. */
@@ -524,6 +537,31 @@ class IslandNotificationListener : NotificationListenerService() {
 
         /** "200 m", "1.2 km", "500 ft", "0.3 mi". */
         private val DISTANCE = Regex("""\b\d+([.,]\d+)?\s?(m|km|ft|mi|yd|metres|meters|miles|feet)\b""", RegexOption.IGNORE_CASE)
+
+        /** Food, grocery and parcel delivery apps that post a live order tracker. */
+        val DELIVERY_APPS = setOf(
+            "com.ubercab.eats", "com.deliveroo.orderapp", "com.justeat.app.uk", "com.justeat.app", "com.takeaway.android",
+            "com.dd.doordash", "com.grubhub.android", "com.postmates.android", "com.instacart.client",
+            "com.global.foodpanda.android", "com.talabat", "com.glovoapp", "com.wolt.android", "com.getir",
+            "in.swiggy.android", "com.application.zomato", "com.zeptoconsumerapp", "com.grofers.customerapp",
+            "com.bigbasket.mobileapp", "com.amazon.mShop.android.shopping", "com.gopuff.consumer", "com.bolt.deliveryclient",
+            "uk.co.dominos.android", "com.dominos", "com.menulog.m", "com.skipthedishes.android", "com.sainsburys.gol",
+            "com.tesco.grocery.view", "com.ocadoretail.android", "com.royalmail.app", "com.dpd.yourdpd",
+            "com.evri.android", "com.ups.mobile.android", "com.fedex.ida.android",
+        )
+
+        /** Ride-hailing apps. */
+        val RIDE_APPS = setOf(
+            "com.ubercab", "me.lyft.android", "ee.mtakso.client", "com.olacabs.customer", "com.rapido.passenger",
+            "com.careem.acma", "com.grabtaxi.passenger", "com.gojek.app", "com.addisonlee.android",
+            "com.freenow.passenger", "taxi.android.client", "com.didiglobal.passenger", "com.indriver",
+        )
+
+        /** "8 min", "8-12 mins", "8 – 12 minutes". */
+        private val MINUTES = Regex("""\b(\d{1,3})(?:\s*[-–]\s*(\d{1,3}))?\s*(?:min|mins|minute|minutes)\b""", RegexOption.IGNORE_CASE)
+
+        /** "7:45", "7:45 PM", "19:45". */
+        private val CLOCK_TIME = Regex("""\b\d{1,2}:\d{2}(?:\s?[AaPp][Mm])?\b""")
 
         /** "4:32", "12:05", "1:02:33". */
         private val TIME = Regex("""\b\d{1,2}:\d{2}(:\d{2})?\b""")

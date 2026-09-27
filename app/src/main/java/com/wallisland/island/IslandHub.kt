@@ -66,8 +66,8 @@ data class LiveInfo(
     val postedAt: Long,
     val intent: PendingIntent?,
 ) {
-    /** Ordered by priority: navigation beats timers beats events beats progress. */
-    enum class Kind { NAV, TIMER, EVENT, PROGRESS }
+    /** Ordered by priority: navigation beats deliveries and rides beats timers beats events beats progress. */
+    enum class Kind { NAV, DELIVERY, TIMER, EVENT, PROGRESS }
 
     /** The time to show for a timer or stopwatch, if any. */
     fun timeText(now: Long = System.currentTimeMillis()): String? {
