@@ -10,6 +10,10 @@ design language: black, white, one red, and dots everywhere.
 | ![Call](docs/screens/call.png) | ![Timer](docs/screens/timer.png) |
 | ![Navigation](docs/screens/nav.png) | ![Download](docs/screens/download.png) |
 | ![Earbuds](docs/screens/earbuds.png) | ![Quick toggles](docs/screens/toggles.png) |
+| ![Volume](docs/screens/volume.png) | ![Do Not Disturb](docs/screens/dnd.png) |
+| ![Peek](docs/screens/peek.png) | ![Next event](docs/screens/event.png) |
+
+![Notification with quick replies and edge light](docs/screens/notification-actions.png)
 
 | ![Now playing, dot art](docs/screens/media-expanded.png) | ![Now playing, cover art](docs/screens/media-expanded-cover.png) |
 |---|---|
@@ -39,6 +43,23 @@ design language: black, white, one red, and dots everywhere.
   Nearby devices permission).
 - **Quick toggles.** Long-press the island for torch, ring / vibrate / silent, rotation lock and
   settings.
+- **Volume in the island.** With *Show above status bar* on, the volume keys drive a dot-matrix
+  volume bar in the island instead of the system panel (it falls back to the normal panel while
+  the island is hidden or the phone is ringing).
+- **Toggle confirmations.** Do Not Disturb, Wi-Fi and Bluetooth flash ON / OFF with a dot icon.
+- **Buttons and quick replies.** Notifications show the app's own buttons (Mark as read, Like…) and
+  one-tap replies (👍, "On my way") sent straight through the app's Reply.
+- **Edge light.** Two comets of dots race around the island's outline, in the app's colour, when a
+  notification arrives.
+- **Peek.** Double-tap the empty pill for the time and battery.
+- **Time to full.** While charging, the island alternates the percentage with "FULL 42M".
+- **Focus timer.** A 25-minute timer from the long-press panel, shown as a live countdown.
+- **Next event.** Ten minutes before a calendar event you get a banner, then a countdown
+  (optional calendar permission).
+- **Essential Key remap.** Settings → *Essential Key* → **Learn**, press the key, then choose short
+  and long press actions: torch, play/pause, quick toggles, screenshot, camera, Assistant, sound
+  mode, focus timer or any app. Uses the accessibility service; if Learn never sees the key, the
+  phone handles it before apps can.
 - **Per-app control.** *Apps that can pop up* lets you turn island notifications off app by app.
 - **Accent colour.** Swap the Nothing red for orange, yellow, green, blue, purple, pink or white.
 - **Charging and low battery.** A five-dot gauge and the percentage in Doto. It turns red at 20%.

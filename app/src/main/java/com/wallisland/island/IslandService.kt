@@ -82,6 +82,8 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         registerReceivers()
         registerCaptureWatchers()
         registerAudioDevices()
+        main.postDelayed(calendarPoll, 3000)
+        if (prefs.focusEnd > System.currentTimeMillis()) postFocus(prefs.focusEnd) else prefs.focusEnd = 0
         prefs.sp.registerOnSharedPreferenceChangeListener(this)
         IslandHub.listener = this
     }
@@ -97,6 +99,11 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
             ACTION_DEMO_PROGRESS -> demoLive(LiveInfo.Kind.PROGRESS)
             ACTION_DEMO_UNLOCK -> { IslandHub.unlockLog = "Demo"; island?.showUnlock() }
             ACTION_DEMO_BUDS -> island?.showBuds(78, "Nothing Ear")
+            ACTION_DEMO_VOLUME -> island?.showVolume(9, 15)
+            ACTION_DEMO_DND -> island?.showStatus(Glyph.MOON, "ON", true)
+            ACTION_DEMO_REPLY -> island?.showNotice(demoReplyNotice())
+            ACTION_DEMO_EVENT -> { demoLive(LiveInfo.Kind.EVENT); announceEvent("demo:event", "Standup", System.currentTimeMillis() + 10 * 60_000, null) }
+            ACTION_DEMO_PEEK -> island?.showPeek()
             ACTION_PREVIEW -> island?.preview()
         }
         return START_STICKY
@@ -451,6 +458,156 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
             torchAvailable = torchId != null,
             ringerMode = am?.ringerMode ?: AudioManager.RINGER_MODE_NORMAL,
             autoRotate = autoRotate(),
+            focusOn = prefs.focusEnd > System.currentTimeMillis(),
+        )
+    }
+
+    override fun batteryLevel(): Int = batteryLevel
+
+    // ---- Volume in the island ----------------------------------------------------------------------------
+
+    /** Handle the volume keys ourselves only when the island can show the result (not while ringing). */
+    fun canShowVolume(): Boolean {
+        val am = getSystemService(AudioManager::class.java) ?: return false
+        return am.mode != AudioManager.MODE_RINGTONE && island?.canShowTransient() == true
+    }
+
+    fun stepVolume(up: Boolean) {
+        val am = getSystemService(AudioManager::class.java) ?: return
+        val stream = when (am.mode) {
+            AudioManager.MODE_IN_CALL, AudioManager.MODE_IN_COMMUNICATION -> AudioManager.STREAM_VOICE_CALL
+            else -> AudioManager.STREAM_MUSIC
+        }
+        try {
+            // No FLAG_SHOW_UI: the island is the volume panel.
+            am.adjustStreamVolume(stream, if (up) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER, 0)
+        } catch (_: SecurityException) {
+        }
+        island?.showVolume(am.getStreamVolume(stream), am.getStreamMaxVolume(stream))
+    }
+
+    fun openToggles() {
+        island?.openTogglesPanel()
+    }
+
+    // ---- Focus timer ---------------------------------------------------------------------------------------
+
+    private val focusDone = Runnable { finishFocus() }
+
+    fun toggleFocus() {
+        if (prefs.focusEnd > System.currentTimeMillis()) stopFocus() else startFocus()
+        island?.refreshQuick()
+    }
+
+    private fun startFocus() {
+        val end = System.currentTimeMillis() + FOCUS_MS
+        prefs.focusEnd = end
+        postFocus(end)
+    }
+
+    private fun postFocus(end: Long) {
+        IslandHub.putLive(
+            LiveInfo(
+                key = FOCUS_KEY, kind = LiveInfo.Kind.TIMER, pkg = packageName, appName = "Focus", title = "Focus",
+                text = "", icon = null, chronoBase = end, countDown = true, staticTime = null, progress = 0,
+                progressMax = 0, indeterminate = false, postedAt = System.currentTimeMillis(), intent = null,
+            )
+        )
+        main.removeCallbacks(focusDone)
+        main.postDelayed(focusDone, (end - System.currentTimeMillis()).coerceAtLeast(0))
+    }
+
+    private fun stopFocus() {
+        main.removeCallbacks(focusDone)
+        prefs.focusEnd = 0
+        IslandHub.removeLive(FOCUS_KEY)
+        island?.showStatus(Glyph.TIMER, "OFF", false)
+    }
+
+    private fun finishFocus() {
+        prefs.focusEnd = 0
+        IslandHub.removeLive(FOCUS_KEY)
+        island?.showStatus(Glyph.CHECK, "DONE", true)
+        Haptics.alert(this)
+    }
+
+    // ---- Calendar ------------------------------------------------------------------------------------------
+
+    private val announcedEvents = HashSet<String>()
+
+    private val calendarPoll = object : Runnable {
+        override fun run() {
+            checkCalendar()
+            main.postDelayed(this, 60_000)
+        }
+    }
+
+    /** Events starting in the next 10 minutes become a live countdown, announced once with a banner. */
+    @SuppressLint("MissingPermission") // Checked into `allowed` just below.
+    private fun checkCalendar() {
+        val allowed = prefs.showEvents &&
+            checkSelfPermission(android.Manifest.permission.READ_CALENDAR) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val keep = HashSet<String>()
+        if (allowed) {
+            val now = System.currentTimeMillis()
+            val uri = android.provider.CalendarContract.Instances.CONTENT_URI.buildUpon().also {
+                android.content.ContentUris.appendId(it, now - EVENT_AFTER_MS)
+                android.content.ContentUris.appendId(it, now + EVENT_BEFORE_MS + 60_000)
+            }.build()
+            val cols = arrayOf(
+                android.provider.CalendarContract.Instances.EVENT_ID,
+                android.provider.CalendarContract.Instances.BEGIN,
+                android.provider.CalendarContract.Instances.TITLE,
+            )
+            try {
+                contentResolver.query(
+                    uri, cols,
+                    "${android.provider.CalendarContract.Instances.ALL_DAY} = 0 AND " +
+                        "${android.provider.CalendarContract.Instances.VISIBLE} = 1",
+                    null, "${android.provider.CalendarContract.Instances.BEGIN} ASC",
+                )?.use { c ->
+                    while (c.moveToNext()) {
+                        val id = c.getLong(0)
+                        val begin = c.getLong(1)
+                        if (begin < now - EVENT_AFTER_MS || begin > now + EVENT_BEFORE_MS) continue
+                        val title = c.getString(2)?.takeIf { it.isNotBlank() } ?: "Event"
+                        val key = "event:$id:$begin"
+                        keep += key
+                        val open = PendingIntent.getActivity(
+                            this, id.toInt(),
+                            Intent(Intent.ACTION_VIEW, android.content.ContentUris.withAppendedId(
+                                android.provider.CalendarContract.Events.CONTENT_URI, id,
+                            )),
+                            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                        )
+                        IslandHub.putLive(
+                            LiveInfo(
+                                key = key, kind = LiveInfo.Kind.EVENT, pkg = "calendar", appName = "Calendar",
+                                title = title, text = "", icon = null, chronoBase = begin, countDown = true,
+                                staticTime = null, progress = 0, progressMax = 0, indeterminate = false,
+                                postedAt = begin, intent = open,
+                            )
+                        )
+                        if (announcedEvents.add(key)) announceEvent(key, title, begin, open)
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+        for (l in IslandHub.currentLive()) {
+            if (l.kind == LiveInfo.Kind.EVENT && l.key !in keep) IslandHub.removeLive(l.key)
+        }
+    }
+
+    private fun announceEvent(key: String, title: String, begin: Long, open: PendingIntent?) {
+        val mins = Math.ceil((begin - System.currentTimeMillis()) / 60_000.0).toInt()
+        val at = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(begin))
+        island?.showNotice(
+            Notice(
+                key = key, pkg = packageName, appName = "Calendar", title = title,
+                text = if (mins > 0) "In $mins min · $at" else "Now · $at",
+                icon = getDrawable(R.drawable.ic_calendar), avatar = null, intent = open, autoCancel = false,
+            )
         )
     }
 
@@ -491,6 +648,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
                 }
                 Settings.System.putInt(contentResolver, Settings.System.ACCELEROMETER_ROTATION, if (autoRotate()) 0 else 1)
             }
+            IslandView.Quick.FOCUS -> toggleFocus()
             IslandView.Quick.SETTINGS -> openSettings()
         }
         island?.refreshQuick()
@@ -748,7 +906,12 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
                 Intent.ACTION_POWER_CONNECTED -> {
                     charging = true
                     // Give the battery broadcast a beat to report the fresh level.
-                    main.postDelayed({ island?.showCharging(batteryLevel.coerceAtLeast(0), true) }, 250)
+                    main.postDelayed({ island?.showCharging(batteryLevel.coerceAtLeast(0), true, chargeTimeMs()) }, 250)
+                    // The estimate often isn't ready at plug-in; try once more.
+                    main.postDelayed({
+                        val t = chargeTimeMs()
+                        if (t > 0) island?.showCharging(batteryLevel.coerceAtLeast(0), true, t)
+                    }, 2500)
                 }
                 Intent.ACTION_POWER_DISCONNECTED -> charging = false
                 Intent.ACTION_BATTERY_CHANGED -> {
@@ -768,6 +931,24 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
                     island?.showRinger(intent.getIntExtra(AudioManager.EXTRA_RINGER_MODE, AudioManager.RINGER_MODE_NORMAL))
                 }
                 Intent.ACTION_USER_PRESENT -> onUnlocked("system signal")
+                android.app.NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED -> if (prefs.showToggleChanges) {
+                    val f = getSystemService(android.app.NotificationManager::class.java)?.currentInterruptionFilter
+                    val on = f != null && f != android.app.NotificationManager.INTERRUPTION_FILTER_ALL &&
+                        f != android.app.NotificationManager.INTERRUPTION_FILTER_UNKNOWN
+                    island?.showStatus(Glyph.MOON, if (on) "ON" else "OFF", on)
+                }
+                android.net.wifi.WifiManager.WIFI_STATE_CHANGED_ACTION -> if (prefs.showToggleChanges && !isInitialStickyBroadcast) {
+                    when (intent.getIntExtra(android.net.wifi.WifiManager.EXTRA_WIFI_STATE, -1)) {
+                        android.net.wifi.WifiManager.WIFI_STATE_ENABLED -> island?.showStatus(Glyph.WIFI, "ON", true)
+                        android.net.wifi.WifiManager.WIFI_STATE_DISABLED -> island?.showStatus(Glyph.WIFI, "OFF", false)
+                    }
+                }
+                android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED -> if (prefs.showToggleChanges && !isInitialStickyBroadcast) {
+                    when (intent.getIntExtra(android.bluetooth.BluetoothAdapter.EXTRA_STATE, -1)) {
+                        android.bluetooth.BluetoothAdapter.STATE_ON -> island?.showStatus(Glyph.BLUETOOTH, "ON", true)
+                        android.bluetooth.BluetoothAdapter.STATE_OFF -> island?.showStatus(Glyph.BLUETOOTH, "OFF", false)
+                    }
+                }
                 android.bluetooth.BluetoothDevice.ACTION_ACL_CONNECTED, ACTION_BT_BATTERY -> onBluetooth(intent)
             }
         }
@@ -784,6 +965,9 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
             addAction(Intent.ACTION_USER_PRESENT)
             addAction(android.bluetooth.BluetoothDevice.ACTION_ACL_CONNECTED)
             addAction(ACTION_BT_BATTERY)
+            addAction(android.app.NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED)
+            addAction(android.net.wifi.WifiManager.WIFI_STATE_CHANGED_ACTION)
+            addAction(android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED)
         }
         torchId = findTorch()
         try {
@@ -823,6 +1007,29 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         autoCancel = false,
     )
 
+    /** A notification with a Reply and a button, to preview quick replies and actions. */
+    private fun demoReplyNotice(): Notice {
+        val pi = PendingIntent.getActivity(this, 9, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+        val input = android.app.RemoteInput.Builder("reply").setLabel("Reply").build()
+        return Notice(
+            key = "demo:reply:${SystemClock.uptimeMillis()}", pkg = packageName, appName = "Messages",
+            title = "Maya", text = "are we still on for tonight?", icon = getDrawable(R.drawable.ic_tile),
+            avatar = null, intent = null, autoCancel = false,
+            actions = listOf(NoticeAction("Reply", pi, input), NoticeAction("Mark as read", pi, null)),
+            color = 0xFF25D366.toInt(),
+        )
+    }
+
+    private fun chargeTimeMs(): Long = if (Build.VERSION.SDK_INT >= 28) {
+        try {
+            getSystemService(BatteryManager::class.java)?.computeChargeTimeRemaining() ?: -1L
+        } catch (_: Exception) {
+            -1L
+        }
+    } else {
+        -1L
+    }
+
     private var demoLiveRestore: Runnable? = null
 
     private fun demoLive(kind: LiveInfo.Kind) {
@@ -834,9 +1041,15 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
                 LiveInfo.Kind.NAV -> "200 m"
                 LiveInfo.Kind.TIMER -> "Timer"
                 LiveInfo.Kind.PROGRESS -> "Downloading"
+                LiveInfo.Kind.EVENT -> "Standup"
             },
             text = "", icon = null,
-            chronoBase = if (kind == LiveInfo.Kind.TIMER) now + 5 * 60_000 else 0L, countDown = true,
+            chronoBase = when (kind) {
+                LiveInfo.Kind.TIMER -> now + 5 * 60_000
+                LiveInfo.Kind.EVENT -> now + 10 * 60_000
+                else -> 0L
+            },
+            countDown = true,
             staticTime = null, progress = 43, progressMax = 100, indeterminate = false,
             postedAt = now, intent = null,
         )
@@ -888,6 +1101,16 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         const val ACTION_DEMO_PROGRESS = "com.wallisland.island.DEMO_PROGRESS"
         const val ACTION_DEMO_UNLOCK = "com.wallisland.island.DEMO_UNLOCK"
         const val ACTION_DEMO_BUDS = "com.wallisland.island.DEMO_BUDS"
+        const val ACTION_DEMO_VOLUME = "com.wallisland.island.DEMO_VOLUME"
+        const val ACTION_DEMO_DND = "com.wallisland.island.DEMO_DND"
+        const val ACTION_DEMO_REPLY = "com.wallisland.island.DEMO_REPLY"
+        const val ACTION_DEMO_EVENT = "com.wallisland.island.DEMO_EVENT"
+        const val ACTION_DEMO_PEEK = "com.wallisland.island.DEMO_PEEK"
+
+        private const val FOCUS_KEY = "focus"
+        private const val FOCUS_MS = 25 * 60_000L
+        private const val EVENT_BEFORE_MS = 10 * 60_000L
+        private const val EVENT_AFTER_MS = 5 * 60_000L
 
         /** Hidden-API broadcast the Bluetooth stack sends when a device reports its battery. */
         private val BT_AUDIO_TYPES = buildSet {
@@ -906,7 +1129,8 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         @Volatile var running = false
             private set
 
-        private var current: IslandService? = null
+        @Volatile var current: IslandService? = null
+            private set
 
         /** A one-line description of what the island is doing, for the settings screen. */
         @Volatile var status = "Not running"

@@ -65,6 +65,7 @@ class MainActivity : Activity() {
         buildShow(col)
         buildBehaviour(col)
         buildSize(col)
+        buildEssentialKey(col)
         buildTroubleshoot(col)
         buildUpdates(col)
         buildFooter(col)
@@ -180,6 +181,11 @@ class MainActivity : Activity() {
                 granted = { checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED },
             ) { requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), 2) })
         }
+        card.addView(divider())
+        card.addView(permissionRow(
+            "Calendar", "Optional. Lets the island count down to your next event.",
+            granted = { checkSelfPermission(Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED },
+        ) { requestPermissions(arrayOf(Manifest.permission.READ_CALENDAR), 3) })
         col.addView(card)
     }
 
@@ -212,9 +218,21 @@ class MainActivity : Activity() {
         row2.addView(small("Buds", IslandService.ACTION_DEMO_BUDS),
             LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         col.addView(row2)
+        val row3 = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(8), 0, 0)
+        }
+        row3.addView(small("Volume", IslandService.ACTION_DEMO_VOLUME), lp())
+        row3.addView(small("DND", IslandService.ACTION_DEMO_DND), lp())
+        row3.addView(small("Reply", IslandService.ACTION_DEMO_REPLY), lp())
+        row3.addView(small("Event", IslandService.ACTION_DEMO_EVENT), lp())
+        row3.addView(small("Peek", IslandService.ACTION_DEMO_PEEK),
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        col.addView(row3)
         col.addView(hint(
             "Tap music to open the player; swipe it left or right to skip. Long-press the island for quick " +
-                "toggles (torch, sound, rotation). Swipe up to dismiss."
+                "toggles (torch, sound, rotation, focus). Double-tap the empty pill for the time and battery. " +
+                "Swipe up to dismiss."
         ))
     }
 
@@ -239,6 +257,14 @@ class MainActivity : Activity() {
         card.addView(unlockLogText)
         card.addView(divider())
         card.addView(toggleRow("Earbuds", "Battery when Bluetooth headphones connect", prefs.showBuds) { prefs.showBuds = it })
+        card.addView(divider())
+        card.addView(toggleRow("Volume in the island", "Replaces the volume panel. Needs \"Show above status bar\"", prefs.volumeInIsland) { prefs.volumeInIsland = it })
+        card.addView(divider())
+        card.addView(toggleRow("Toggle confirmations", "Do Not Disturb, Wi-Fi and Bluetooth on/off", prefs.showToggleChanges) { prefs.showToggleChanges = it })
+        card.addView(divider())
+        card.addView(toggleRow("Edge light", "Dots race around the island when a notification arrives", prefs.edgeLight) { prefs.edgeLight = it })
+        card.addView(divider())
+        card.addView(toggleRow("Calendar events", "A countdown 10 minutes before each event", prefs.showEvents) { prefs.showEvents = it })
         card.addView(divider())
         card.addView(toggleRow("Idle pill", "Keep a small pill around the camera when nothing's happening", prefs.showIdle) { prefs.showIdle = it })
         card.addView(divider())
@@ -358,6 +384,125 @@ class MainActivity : Activity() {
         col.addView(card)
     }
 
+    // ---- Essential Key ---------------------------------------------------------------------------------------
+
+    private lateinit var keyStatus: TextView
+
+    private fun keyStatusText(): String {
+        val code = prefs.essentialKey
+        return if (code < 0) "Not set up. Tap Learn, then press your Essential Key."
+        else "Learned: ${android.view.KeyEvent.keyCodeToString(code)} ($code)"
+    }
+
+    private fun buildEssentialKey(col: LinearLayout) {
+        col.addView(sectionLabel("ESSENTIAL KEY"))
+        val card = card()
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(20), dp(16), dp(16), dp(16))
+        }
+        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, dp(12), 0) }
+        texts.addView(titleView("Remap the key"))
+        keyStatus = subView(keyStatusText())
+        texts.addView(keyStatus)
+        row.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(pillButton(this, "Learn") { learnKey() })
+        card.addView(row)
+        card.addView(divider())
+        card.addView(keyActionRow("Short press", short = true))
+        card.addView(divider())
+        card.addView(keyActionRow("Long press", short = false))
+        col.addView(card)
+        col.addView(hint(
+            "Uses \"Show above status bar\" (Accessibility). If Learn never sees the key, Nothing OS handles it " +
+                "before apps can, and it can't be remapped. Leave both on Default to keep Essential Space."
+        ))
+    }
+
+    private val learnTimeout = Runnable {
+        if (!IslandAccessibilityService.learning) return@Runnable
+        IslandAccessibilityService.learning = false
+        keyStatus.text = "Didn't see a key press. Your phone may not pass the Essential Key to apps."
+        keyStatus.setTextColor(Look.accent)
+    }
+
+    private fun learnKey() {
+        if (IslandAccessibilityService.instance == null) {
+            toast("Turn on \"Show above status bar\" (Accessibility) first")
+            startSafely(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            return
+        }
+        IslandAccessibilityService.onLearned = { code ->
+            keyStatus.removeCallbacks(learnTimeout)
+            keyStatus.text = keyStatusText()
+            keyStatus.setTextColor(Look.GREY)
+            toast("Got it: ${android.view.KeyEvent.keyCodeToString(code)}")
+        }
+        IslandAccessibilityService.learning = true
+        keyStatus.text = "Press your Essential Key now…"
+        keyStatus.setTextColor(Look.WHITE)
+        keyStatus.removeCallbacks(learnTimeout)
+        keyStatus.postDelayed(learnTimeout, 10_000)
+    }
+
+    private fun actionLabel(short: Boolean): String {
+        val a = KeyAction.of(if (short) prefs.essentialShort else prefs.essentialLong)
+        if (a != KeyAction.APP) return a.label
+        val pkg = if (short) prefs.essentialShortApp else prefs.essentialLongApp
+        return "Open " + IslandNotificationListener.appLabel(this, pkg)
+    }
+
+    private fun keyActionRow(title: String, short: Boolean): View {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(20), dp(16), dp(20), dp(16))
+            isClickable = true
+        }
+        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        texts.addView(titleView(title))
+        val sub = subView(actionLabel(short))
+        texts.addView(sub)
+        row.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(TextView(this).apply { text = "›"; textSize = 22f; setTextColor(Look.GREY) })
+        row.setOnClickListener { chooseKeyAction(short) { sub.text = actionLabel(short) } }
+        return row
+    }
+
+    private fun chooseKeyAction(short: Boolean, done: () -> Unit) {
+        val actions = KeyAction.values()
+        android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle(if (short) "Short press" else "Long press")
+            .setItems(actions.map { it.label }.toTypedArray()) { _, i ->
+                val a = actions[i]
+                if (a == KeyAction.APP) {
+                    chooseApp { pkg ->
+                        if (short) { prefs.essentialShort = a.name; prefs.essentialShortApp = pkg }
+                        else { prefs.essentialLong = a.name; prefs.essentialLongApp = pkg }
+                        done()
+                    }
+                } else {
+                    if (short) prefs.essentialShort = a.name else prefs.essentialLong = a.name
+                    done()
+                }
+            }
+            .show()
+    }
+
+    private fun chooseApp(picked: (String) -> Unit) {
+        val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        @Suppress("DEPRECATION")
+        val apps = packageManager.queryIntentActivities(launcher, 0)
+            .map { it.activityInfo.packageName }.distinct().filter { it != packageName }
+            .map { it to IslandNotificationListener.appLabel(this, it) }
+            .sortedBy { it.second.lowercase() }
+        android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Open which app?")
+            .setItems(apps.map { it.second }.toTypedArray()) { _, i -> picked(apps[i].first) }
+            .show()
+    }
+
     /** Shows exactly what the island sees, so a screenshot is enough to fix detection problems. */
     private fun buildTroubleshoot(col: LinearLayout) {
         col.addView(sectionLabel("TROUBLESHOOT"))
@@ -395,6 +540,11 @@ class MainActivity : Activity() {
         append(listener?.describeOngoing() ?: "Notification access is off, or the listener isn't connected yet.")
         append("\n\nUNLOCK\n").append(IslandHub.unlockLog)
         append("\n\nHEADPHONES\n").append(IslandHub.budsLog)
+        append("\n\nKEYS\nLast key seen: ").append(IslandAccessibilityService.lastKey)
+        append(" · Essential Key: ").append(
+            if (prefs.essentialKey < 0) "not learned" else android.view.KeyEvent.keyCodeToString(prefs.essentialKey)
+        )
+        append(" · Accessibility: ").append(if (IslandAccessibilityService.instance != null) "on" else "off")
         append("\n\nAndroid ").append(Build.VERSION.RELEASE).append(" · ").append(Build.MANUFACTURER)
             .append(' ').append(Build.MODEL).append(" · build ").append(Updater.currentBuild(this@MainActivity))
     }

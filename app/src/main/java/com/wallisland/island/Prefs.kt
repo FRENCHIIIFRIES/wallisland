@@ -33,6 +33,30 @@ class Prefs(context: Context) {
     var showLive by bool("show_live", true)
     var showUnlock by bool("show_unlock", true)
     var showBuds by bool("show_buds", true)
+    var volumeInIsland by bool("volume_island", true)
+    var showToggleChanges by bool("show_toggle_changes", true)
+    var edgeLight by bool("edge_light", true)
+    var showEvents by bool("show_events", true)
+
+    /** Essential Key remap: the learned key code (-1 = not learned) and what short/long presses do. */
+    var essentialKey by int("essential_key", -1)
+    var essentialShort: String
+        get() = sp.getString("essential_short", KeyAction.DEFAULT.name) ?: KeyAction.DEFAULT.name
+        set(v) = sp.edit().putString("essential_short", v).apply()
+    var essentialLong: String
+        get() = sp.getString("essential_long", KeyAction.DEFAULT.name) ?: KeyAction.DEFAULT.name
+        set(v) = sp.edit().putString("essential_long", v).apply()
+    var essentialShortApp: String
+        get() = sp.getString("essential_short_app", "") ?: ""
+        set(v) = sp.edit().putString("essential_short_app", v).apply()
+    var essentialLongApp: String
+        get() = sp.getString("essential_long_app", "") ?: ""
+        set(v) = sp.edit().putString("essential_long_app", v).apply()
+
+    /** Wall-clock end of a running focus timer, or 0. */
+    var focusEnd: Long
+        get() = sp.getLong("focus_end", 0L)
+        set(v) = sp.edit().putLong("focus_end", v).apply()
 
     /** Accent colour (ARGB). */
     var accent by int("accent", Look.RED)

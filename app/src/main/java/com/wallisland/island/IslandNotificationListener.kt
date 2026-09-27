@@ -153,6 +153,8 @@ class IslandNotificationListener : NotificationListenerService() {
             avatar = avatar,
             intent = n.contentIntent,
             autoCancel = n.flags and Notification.FLAG_AUTO_CANCEL != 0,
+            actions = actionsOf(n),
+            color = n.color,
         )
     }
 
@@ -322,6 +324,15 @@ class IslandNotificationListener : NotificationListenerService() {
             intent = n.contentIntent,
         )
     }
+
+    /** The notification's own buttons, keeping any that take a typed reply (for quick replies). */
+    private fun actionsOf(n: Notification): List<NoticeAction> = n.actions.orEmpty().mapNotNull { a ->
+        val pi = a.actionIntent ?: return@mapNotNull null
+        val title = a.title?.toString()?.trim().orEmpty()
+        if (title.isEmpty()) return@mapNotNull null
+        val reply = a.remoteInputs?.firstOrNull { it.allowFreeFormInput }
+        NoticeAction(title, pi, reply)
+    }.take(3)
 
     /** For messaging-style notifications, show the newest message rather than "3 new messages". */
     private fun lastMessage(extras: android.os.Bundle): String? {

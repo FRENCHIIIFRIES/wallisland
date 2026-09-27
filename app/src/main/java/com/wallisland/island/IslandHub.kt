@@ -17,7 +17,14 @@ data class Notice(
     val avatar: Bitmap?,
     val intent: PendingIntent?,
     val autoCancel: Boolean,
+    /** The app's own buttons ("Reply", "Mark as read"…), at most three. */
+    val actions: List<NoticeAction> = emptyList(),
+    /** The app's notification colour, for the edge light; 0 when it has none. */
+    val color: Int = 0,
 )
+
+/** A notification button. [reply] is set when it takes typed input (quick replies use it). */
+data class NoticeAction(val title: String, val intent: PendingIntent, val reply: android.app.RemoteInput?)
 
 /** A call in progress (or ringing), from a call-style notification. */
 data class CallInfo(
@@ -52,7 +59,8 @@ data class LiveInfo(
     val postedAt: Long,
     val intent: PendingIntent?,
 ) {
-    enum class Kind { NAV, TIMER, PROGRESS }
+    /** Ordered by priority: navigation beats timers beats events beats progress. */
+    enum class Kind { NAV, TIMER, EVENT, PROGRESS }
 
     /** The time to show for a timer or stopwatch, if any. */
     fun timeText(now: Long = System.currentTimeMillis()): String? {
@@ -62,6 +70,12 @@ data class LiveInfo(
             return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s / 60 % 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
         }
         return staticTime
+    }
+
+    /** For calendar events: minutes until it starts ("10m"), or NOW once it has. */
+    fun eventText(now: Long = System.currentTimeMillis()): String {
+        val min = Math.ceil((chronoBase - now) / 60_000.0).toInt()
+        return if (min <= 0) "NOW" else "${min}m"
     }
 
     val percent: Int get() = if (progressMax > 0) (progress * 100 / progressMax).coerceIn(0, 100) else 0
