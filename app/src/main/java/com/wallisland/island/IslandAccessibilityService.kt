@@ -59,7 +59,7 @@ class IslandAccessibilityService : AccessibilityService() {
     override fun onKeyEvent(event: KeyEvent): Boolean {
         val code = event.keyCode
         if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
-            lastKey = "${KeyEvent.keyCodeToString(code)} ($code)"
+            lastKey = "${KeyEvent.keyCodeToString(code)} ($code), scan code ${event.scanCode}"
         }
 
         // "Learn key": the next key that isn't a standard button becomes the Essential Key.
@@ -67,15 +67,28 @@ class IslandAccessibilityService : AccessibilityService() {
             if (event.action == KeyEvent.ACTION_UP) {
                 learning = false
                 prefs.essentialKey = code
+                prefs.essentialScan = event.scanCode
                 main.post { onLearned?.invoke(code) }
             }
             return true
         }
 
-        if (code == prefs.essentialKey && code != KeyEvent.KEYCODE_UNKNOWN) return essential(event)
+        if (isEssential(event)) return essential(event)
 
         if (code == KeyEvent.KEYCODE_VOLUME_UP || code == KeyEvent.KEYCODE_VOLUME_DOWN) return volume(event)
         return false
+    }
+
+    /**
+     * The learned key: by key code when it has a real one, otherwise (KEYCODE_UNKNOWN, as Nothing's
+     * Essential Key reports) by its hardware scan code.
+     */
+    private fun isEssential(e: KeyEvent): Boolean {
+        val code = prefs.essentialKey
+        if (code > 0) return e.keyCode == code
+        val scan = prefs.essentialScan
+        return code == KeyEvent.KEYCODE_UNKNOWN && scan > 0 &&
+            e.keyCode == KeyEvent.KEYCODE_UNKNOWN && e.scanCode == scan
     }
 
     /** Volume keys drive the island's own volume bar instead of the system panel, when it's showing. */

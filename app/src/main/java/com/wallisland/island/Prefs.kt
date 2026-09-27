@@ -40,6 +40,12 @@ class Prefs(context: Context) {
 
     /** Essential Key remap: the learned key code (-1 = not learned) and what short/long presses do. */
     var essentialKey by int("essential_key", -1)
+
+    /**
+     * The key's hardware scan code. Nothing's Essential Key has no standard key code (it arrives as
+     * KEYCODE_UNKNOWN), so it's recognised by this instead. -1 = not learned.
+     */
+    var essentialScan by int("essential_scan", -1)
     var essentialShort: String
         get() = sp.getString("essential_short", KeyAction.DEFAULT.name) ?: KeyAction.DEFAULT.name
         set(v) = sp.edit().putString("essential_short", v).apply()

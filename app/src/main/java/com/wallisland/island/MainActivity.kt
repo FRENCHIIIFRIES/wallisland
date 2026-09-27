@@ -390,8 +390,14 @@ class MainActivity : Activity() {
 
     private fun keyStatusText(): String {
         val code = prefs.essentialKey
-        return if (code < 0) "Not set up. Tap Learn, then press your Essential Key."
-        else "Learned: ${android.view.KeyEvent.keyCodeToString(code)} ($code)"
+        val scan = prefs.essentialScan
+        return when {
+            code < 0 -> "Not set up. Tap Learn, then press your Essential Key."
+            code > 0 -> "Learned: ${android.view.KeyEvent.keyCodeToString(code)} ($code)"
+            // No standard key code: recognised by its hardware scan code instead.
+            scan > 0 -> "Learned: hardware key $scan (no standard key code, matched by scan code)"
+            else -> "Learned by an older build without its scan code. Tap Learn and press the key again."
+        }
     }
 
     private fun buildEssentialKey(col: LinearLayout) {
@@ -437,7 +443,7 @@ class MainActivity : Activity() {
             keyStatus.removeCallbacks(learnTimeout)
             keyStatus.text = keyStatusText()
             keyStatus.setTextColor(Look.GREY)
-            toast("Got it: ${android.view.KeyEvent.keyCodeToString(code)}")
+            toast(if (code > 0) "Got it: ${android.view.KeyEvent.keyCodeToString(code)}" else "Got it: hardware key ${prefs.essentialScan}")
         }
         IslandAccessibilityService.learning = true
         keyStatus.text = "Press your Essential Key now…"
@@ -542,7 +548,8 @@ class MainActivity : Activity() {
         append("\n\nHEADPHONES\n").append(IslandHub.budsLog)
         append("\n\nKEYS\nLast key seen: ").append(IslandAccessibilityService.lastKey)
         append(" · Essential Key: ").append(
-            if (prefs.essentialKey < 0) "not learned" else android.view.KeyEvent.keyCodeToString(prefs.essentialKey)
+            if (prefs.essentialKey < 0) "not learned"
+            else android.view.KeyEvent.keyCodeToString(prefs.essentialKey) + ", scan ${prefs.essentialScan}"
         )
         append(" · Accessibility: ").append(if (IslandAccessibilityService.instance != null) "on" else "off")
         append("\n\nAndroid ").append(Build.VERSION.RELEASE).append(" · ").append(Build.MANUFACTURER)
