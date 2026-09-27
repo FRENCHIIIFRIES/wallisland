@@ -165,6 +165,14 @@ object IslandHub {
         listener?.onNotice(notice)
     }
 
+    /** Notifications already in the shade when the listener connects; newest five kept. */
+    fun seedHistory(notices: List<Notice>) {
+        val keys = history.map { it.key }.toSet()
+        history += notices.filter { it.key !in keys }
+        history.sortByDescending { it.postedAt }
+        while (history.size > HISTORY_SIZE) history.removeAt(history.size - 1)
+    }
+
     const val HISTORY_SIZE = 5
 
     fun removeNotice(key: String) {

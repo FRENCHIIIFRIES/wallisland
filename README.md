@@ -59,12 +59,14 @@ design language: black, white, one red, and dots everywhere.
 - **Edge light.** Two comets of dots race around the island's outline, in the app's colour, when a
   notification arrives.
 - **Peek and weather.** Double-tap the empty pill for the time, battery and the weather (from
-  Open-Meteo, for a rough location saved while the app is open; optional location permission).
+  Open-Meteo). It uses a rough phone location when allowed, otherwise the city estimated from your
+  internet connection (geojs.io), and is fetched in the background so it's ready.
 - **Calls.** A ringing call opens a card with green Answer and red Decline. Tap an ongoing call's
   pill for a red hang-up button. Uses the call's own notification buttons; for calls without them,
   the optional *Phone calls* permission lets the island answer and hang up through Android.
-- **Recent notifications.** Swipe down on the island for your last five notifications; tap one to
-  open it. Swipe down again to pull down the full notification shade.
+- **Recent notifications.** Tap the empty pill (or swipe down on it) for your last five
+  notifications, including ones already in the shade; tap one to open it. Tap "ALL ›" or swipe down
+  again for the full notification shade.
 - **Island replaces pop-ups.** Stops notifications showing twice (the system banner and the island).
   Needs a one-time `adb shell pm grant com.wallisland.island android.permission.WRITE_SECURE_SETTINGS`;
   the system banners come back by themselves whenever the island is hidden or turned off.

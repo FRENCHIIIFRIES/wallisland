@@ -87,7 +87,7 @@ class MainActivity : Activity() {
         refresh()
         IslandService.start(this)
         // Android only gives location to the app on screen, so note it now for the island's weather.
-        if (Weather.saveLocation(this)) Weather.refresh(this)
+        Weather.locate(this)
         IslandService.current?.refreshPopups()
     }
 

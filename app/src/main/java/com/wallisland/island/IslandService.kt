@@ -71,6 +71,7 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         super.onCreate()
         prefs = Prefs(this)
         Look.accent = prefs.accent
+        Weather.refresh(this)
         chooseHost()
         goForeground()
         if (!canHost(this) || !prefs.enabled) {
@@ -1055,6 +1056,8 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
             when (intent.action) {
                 Intent.ACTION_SCREEN_ON -> {
                     island?.setScreenOn(true)
+                    // Have the weather ready before the double-tap asks for it.
+                    Weather.refresh(this@IslandService)
                     startLockWatch()
                 }
                 Intent.ACTION_SCREEN_OFF -> {

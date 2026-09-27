@@ -863,10 +863,10 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
 
     // ---- Notification history ----------------------------------------------------------------------------
 
-    private fun openHistory() {
+    private fun openHistory(fromTap: Boolean = false) {
         val items = IslandHub.history.toList()
-        if (items.isEmpty()) {
-            // Nothing of ours to show: go straight to the system's.
+        if (items.isEmpty() && !fromTap) {
+            // Pulled down with nothing of ours to show: go straight to the system's.
             host.openShade()
             return
         }
@@ -893,7 +893,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
 
     /** Recent notifications, newest first: avatar or app icon, who, what, and how long ago. */
     private fun drawHistory(canvas: Canvas, alpha: Int) {
-        drawHeader(canvas, "Recent", "PULL FOR ALL", alpha)
+        drawHeader(canvas, "Recent", "ALL ›", alpha)
         val rowH = context.dp(HISTORY_ROW_DP)
         var top = pillRect.top + topZone + context.dp(4f)
         val s = context.dp(30f)
@@ -902,6 +902,11 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         bodyPaint.alpha = alpha
         labelPaint.alpha = alpha
         hitHistory.forEach { it.setEmpty() }
+        if (historyItems.isEmpty()) {
+            bodyPaint.alpha = alpha
+            drawText(canvas, "No notifications right now", left, top + rowH / 2f, pillRect.width(), bodyPaint, centerY = true)
+            return
+        }
         for ((i, n) in historyItems.withIndex()) {
             val cy = top + rowH / 2f
             box.set(left, cy - s / 2f, left + s, cy + s / 2f)
@@ -928,6 +933,8 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         val n = historyItems.getOrNull(i)
         if (n == null) {
             closeHistory()
+            // The header strip ("ALL ›") opens the full notification shade.
+            if (y < pillRect.top + topZone) host.openShade()
             return
         }
         buzz()
@@ -1476,7 +1483,14 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         override fun onDown(e: MotionEvent) = true
 
         override fun onSingleTapUp(e: MotionEvent): Boolean {
+            // The empty pill waits to be sure it isn't a double-tap (peek) before opening recents.
+            if (shownMode == Mode.IDLE) return true
             onTap(e.x, e.y)
+            return true
+        }
+
+        override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+            if (shownMode == Mode.IDLE) openHistory(fromTap = true)
             return true
         }
 

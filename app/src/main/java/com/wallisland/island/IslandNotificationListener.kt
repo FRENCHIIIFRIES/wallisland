@@ -53,6 +53,9 @@ class IslandNotificationListener : NotificationListenerService() {
             val active = activeNotifications.orEmpty()
             active.firstOrNull { isCall(it) }?.let { IslandHub.postCall(toCall(it)) }
             for (sbn in active) toLive(sbn)?.let { IslandHub.putLive(it) }
+            // Fill the recent list with what's already in the shade, without popping any of it up.
+            val ranking = currentRanking
+            IslandHub.seedHistory(active.filter { !isCall(it) && toLive(it) == null }.mapNotNull { toNotice(it, ranking) })
         } catch (_: Exception) {
         }
         try {
@@ -155,6 +158,7 @@ class IslandNotificationListener : NotificationListenerService() {
             autoCancel = n.flags and Notification.FLAG_AUTO_CANCEL != 0,
             actions = actionsOf(n),
             color = n.color,
+            postedAt = sbn.postTime,
         )
     }
 

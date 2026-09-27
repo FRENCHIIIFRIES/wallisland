@@ -60,36 +60,35 @@ object Weather {
     fun refresh(ctx: Context, done: () -> Unit = {}) {
         val prefs = Prefs(ctx)
         if (!prefs.showWeather) return
-        val lat = prefs.weatherLat.toDoubleOrNull()
-        val lon = prefs.weatherLon.toDoubleOrNull()
-        if (lat == null || lon == null) {
-            log = "No location saved yet: allow location in Wallisland's Setup, then open the app once"
-            return
-        }
         val t = SystemClock.elapsedRealtime()
         val n = now
-        if (fetching || (n != null && t - n.fetchedAt < FRESH_MS) || (lastTry > 0 && t - lastTry < RETRY_MS && n == null)) return
+        if (fetching || (n != null && n.fetchedAt > 0 && t - n.fetchedAt < FRESH_MS) ||
+            (lastTry > 0 && t - lastTry < RETRY_MS && n == null)
+        ) return
         fetching = true
         lastTry = t
         Thread {
             try {
+                var lat = prefs.weatherLat.toDoubleOrNull()
+                var lon = prefs.weatherLon.toDoubleOrNull()
+                if (lat == null || lon == null) {
+                    // No location from the phone yet: your city, estimated from your internet connection.
+                    val geo = JSONObject(get("https://get.geojs.io/v1/ip/geo.json"))
+                    lat = geo.getString("latitude").toDouble()
+                    lon = geo.getString("longitude").toDouble()
+                }
                 val url = URL(
                     "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon" +
                         "&current=temperature_2m,weather_code,is_day",
                 )
-                val conn = url.openConnection() as HttpURLConnection
-                conn.connectTimeout = 8000
-                conn.readTimeout = 8000
-                val body = conn.inputStream.bufferedReader().use { it.readText() }
-                conn.disconnect()
-                val cur = JSONObject(body).getJSONObject("current")
+                val cur = JSONObject(get(url.toString())).getJSONObject("current")
                 now = Now(
                     tempC = cur.getDouble("temperature_2m"),
                     code = cur.getInt("weather_code"),
                     isDay = cur.optInt("is_day", 1) == 1,
                     fetchedAt = SystemClock.elapsedRealtime(),
                 )
-                log = "OK: ${text(now!!)}"
+                log = "OK: ${text(now!!)}" + if (prefs.weatherLat.isEmpty()) " (city from your connection)" else ""
             } catch (e: Exception) {
                 log = "Couldn't fetch: ${e.javaClass.simpleName}"
             } finally {
@@ -97,6 +96,54 @@ object Weather {
                 main.post(done)
             }
         }.start()
+    }
+
+    private fun get(url: String): String {
+        val conn = URL(url).openConnection() as HttpURLConnection
+        conn.connectTimeout = 8000
+        conn.readTimeout = 8000
+        return try {
+            conn.inputStream.bufferedReader().use { it.readText() }
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    /**
+     * Asks for a fresh rough fix (Android often has no last-known location saved), then fetches the weather
+     * for it. Only works while the settings screen is open.
+     */
+    @SuppressLint("MissingPermission")
+    fun locate(ctx: Context, done: () -> Unit = {}) {
+        if (saveLocation(ctx)) {
+            forceNext()
+            refresh(ctx, done)
+        }
+        if (!hasLocationPermission(ctx) || android.os.Build.VERSION.SDK_INT < 30) return
+        val lm = ctx.getSystemService(LocationManager::class.java) ?: return
+        val providers = buildList {
+            add(LocationManager.NETWORK_PROVIDER)
+            if (android.os.Build.VERSION.SDK_INT >= 31) add(LocationManager.FUSED_PROVIDER)
+            add(LocationManager.GPS_PROVIDER)
+        }
+        val provider = providers.firstOrNull { runCatching { lm.isProviderEnabled(it) }.getOrDefault(false) } ?: return
+        try {
+            lm.getCurrentLocation(provider, null, ctx.mainExecutor) { loc ->
+                if (loc == null) return@getCurrentLocation
+                val prefs = Prefs(ctx)
+                prefs.weatherLat = "%.2f".format(Locale.US, loc.latitude)
+                prefs.weatherLon = "%.2f".format(Locale.US, loc.longitude)
+                forceNext()
+                refresh(ctx, done)
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    /** The next refresh fetches even if the last reading is fresh (the location changed). */
+    private fun forceNext() {
+        now = now?.copy(fetchedAt = 0L)
+        lastTry = 0L
     }
 
     /** Fahrenheit where people expect it, Celsius everywhere else. */
