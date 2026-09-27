@@ -11,7 +11,6 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.widget.Toast
-import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 
@@ -22,7 +21,13 @@ import java.net.URL
  */
 object Updater {
     private const val REPO = "FRENCHIIIFRIES/wallisland"
-    private const val LATEST = "https://api.github.com/repos/$REPO/releases/latest"
+    private const val RELEASES = "https://api.github.com/repos/$REPO/releases?per_page=50"
+
+    /**
+     * Written into the notes of every release the main branch publishes. Other branches in the repo can
+     * publish their own `build-N` releases (and win "latest"); only releases carrying this mark count.
+     */
+    private const val CHANNEL_MARK = "channel: wallisland-main"
     private const val ASSET = "Wallisland.apk"
 
     data class Release(val build: Int, val apkUrl: String, val sizeBytes: Long)
@@ -40,25 +45,18 @@ object Updater {
         return if (Build.VERSION.SDK_INT >= 28) info.longVersionCode.toInt() else @Suppress("DEPRECATION") info.versionCode
     }
 
-    /** Looks up the latest release on a background thread; [done] runs on the main thread. */
+    /**
+     * Finds the newest main-branch release on a background thread; [done] runs on the main thread.
+     * Picks the highest build number among marked releases rather than trusting GitHub's "latest".
+     */
     fun check(ctx: Context, done: (Check) -> Unit) {
         val app = ctx.applicationContext
         Thread {
             val result = try {
-                val json = JSONObject(get(LATEST))
-                val build = json.getString("tag_name").removePrefix("build-").toIntOrNull()
-                    ?: throw IllegalStateException("Unexpected release name")
-                val assets = json.getJSONArray("assets")
-                var apk: Release? = null
-                for (i in 0 until assets.length()) {
-                    val a = assets.getJSONObject(i)
-                    if (a.getString("name") == ASSET) {
-                        apk = Release(build, a.getString("browser_download_url"), a.optLong("size", -1))
-                    }
-                }
+                val newest = newestRelease(org.json.JSONArray(get(RELEASES)))
                 when {
-                    apk == null -> Check.Failed("The latest release has no APK yet")
-                    build > currentBuild(app) -> Check.Available(apk)
+                    newest == null -> Check.Failed("No release with an APK yet")
+                    newest.build > currentBuild(app) -> Check.Available(newest)
                     else -> Check.UpToDate
                 }
             } catch (e: Exception) {
@@ -66,6 +64,26 @@ object Updater {
             }
             main.post { done(result) }
         }.start()
+    }
+
+    /** The highest-numbered `build-N` release that carries [CHANNEL_MARK] and has the APK attached. */
+    fun newestRelease(releases: org.json.JSONArray): Release? {
+        var best: Release? = null
+        for (i in 0 until releases.length()) {
+            val r = releases.getJSONObject(i)
+            if (r.optBoolean("draft") || r.optBoolean("prerelease")) continue
+            if (!r.optString("body").contains(CHANNEL_MARK)) continue
+            val build = r.optString("tag_name").removePrefix("build-").toIntOrNull() ?: continue
+            val assets = r.optJSONArray("assets") ?: continue
+            for (j in 0 until assets.length()) {
+                val a = assets.getJSONObject(j)
+                if (a.optString("name") != ASSET) continue
+                if (best == null || build > best.build) {
+                    best = Release(build, a.getString("browser_download_url"), a.optLong("size", -1))
+                }
+            }
+        }
+        return best
     }
 
     /** True once the user has let Wallisland install apps; otherwise opens that settings page. */
