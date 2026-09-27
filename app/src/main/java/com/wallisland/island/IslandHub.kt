@@ -104,6 +104,9 @@ data class MediaInfo(
     /** Playing on another device (Cast, Spotify Connect…), and that device's name when the app says. */
     val remote: Boolean = false,
     val device: String? = null,
+    /** The next song in the app's queue ("Title — Artist") and its queue id, when the app shares its queue. */
+    val upNext: String? = null,
+    val upNextId: Long = -1,
 ) {
     /** Extrapolates the playhead from the last reported position, like the system media controls do. */
     fun currentPosition(): Long {

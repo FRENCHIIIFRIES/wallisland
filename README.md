@@ -17,6 +17,7 @@ design language: black, white, one red, and dots everywhere.
 | ![Timers](docs/screens/timers.png) | ![Brightness](docs/screens/brightness.png) |
 | ![Unlock](docs/screens/unlock.png) | ![Wi-Fi](docs/screens/wifi.png) |
 | ![Split island](docs/screens/split.png) | ![Casting](docs/screens/cast.png) |
+| ![Car mode](docs/screens/car.png) | ![Pinned note](docs/screens/note.png) |
 
 ![Recent notifications](docs/screens/history.png)
 
@@ -58,6 +59,12 @@ design language: black, white, one red, and dots everywhere.
 - **Deliveries and rides.** Uber, Uber Eats, Deliveroo, Just Eat, DoorDash, Swiggy, Zomato, Lyft, Bolt
   and others: a car or bag, the arrival time ("8-12 MIN", "7:45"), and a dot travelling along the
   bottom of the pill (real progress when the app reports it).
+- **Up next.** The expanded player shows the next song in the app's queue; tap it to jump there
+  (for apps that share their queue).
+- **Car mode.** Connected to the car's Bluetooth or Android Auto, a long-press (or tapping the music
+  pill) opens three big buttons: previous, play / pause, next.
+- **Pinned note.** "+ NOTE" in the long-press panel pins a short note to the island: a dot on the idle
+  pill, the note at the top of the panel, and a tick to clear it.
 - **Split island.** Two things at once (music and a timer, a call and music): the second pops out as
   its own bubble to the left of the pill (clear of the status icons); tap it to open that one.
 - **Casting.** Music playing on a TV or speaker (Cast, Spotify Connect) shows a cast glyph and

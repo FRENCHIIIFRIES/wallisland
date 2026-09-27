@@ -435,6 +435,7 @@ class IslandNotificationListener : NotificationListenerService() {
                 override fun onMetadataChanged(metadata: MediaMetadata?) = publishMedia()
                 override fun onSessionDestroyed() = publishMedia()
                 override fun onAudioInfoChanged(info: MediaController.PlaybackInfo?) = publishMedia()
+                override fun onQueueChanged(queue: MutableList<android.media.session.MediaSession.QueueItem>?) = publishMedia()
             }
             c.registerCallback(cb, main)
             controllers += c to cb
@@ -463,6 +464,19 @@ class IslandNotificationListener : NotificationListenerService() {
             ?: md.getBitmap(MediaMetadata.METADATA_KEY_ART)
             ?: md.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON)
         val playing = st?.state == PlaybackState.STATE_PLAYING || st?.state == PlaybackState.STATE_BUFFERING
+        // Up next: the queue item after the one playing, when the app shares its queue.
+        val next = try {
+            val q = chosen.queue.orEmpty()
+            val i = q.indexOfFirst { it.queueId == st?.activeQueueItemId }
+            if (i >= 0) q.getOrNull(i + 1) else null
+        } catch (_: Exception) {
+            null
+        }
+        val nextText = next?.description?.let { d ->
+            val t = d.title?.toString()?.trim().orEmpty()
+            val a = d.subtitle?.toString()?.trim().orEmpty()
+            if (t.isEmpty()) null else if (a.isEmpty()) t else "$t — $a"
+        }
         IslandHub.postMedia(
             MediaInfo(
                 pkg = chosen.packageName,
@@ -480,6 +494,8 @@ class IslandNotificationListener : NotificationListenerService() {
                 controller = chosen,
                 remote = chosen.playbackInfo?.playbackType == MediaController.PlaybackInfo.PLAYBACK_TYPE_REMOTE,
                 device = castDevice(chosen.packageName),
+                upNext = nextText,
+                upNextId = next?.queueId ?: -1,
             )
         )
     }

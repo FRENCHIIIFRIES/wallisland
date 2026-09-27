@@ -27,12 +27,27 @@ class ReplyActivity : Activity() {
 
     private var target: Pair<Notice, NoticeAction>? = null
 
+    /** Writing the pinned note rather than a reply. */
+    private var noteMode = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val t = pending ?: run { finish(); return }
+        noteMode = pendingNote
+        pendingNote = false
+        val t = pending
         pending = null
+        if (!noteMode && t == null) {
+            finish()
+            return
+        }
         target = t
-        val (notice, action) = t
+        val current = Prefs(this).pinnedNote
+        // The note card reuses the reply card's look: a stand-in "notice" for its header.
+        val notice = t?.first ?: Notice(
+            key = "note", pkg = packageName, appName = "Note", title = "Pin a note to the island",
+            text = if (current.isBlank()) "Tick it off from the long-press panel when it's done" else "Clear the text to unpin it",
+            icon = null, avatar = null, intent = null, autoCancel = false,
+        )
         window.setSoftInputMode(
             WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE or WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE,
         )
@@ -93,7 +108,11 @@ class ReplyActivity : Activity() {
 
         val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         val input = EditText(this).apply {
-            hint = "Reply to ${notice.title.ifEmpty { notice.appName }}"
+            hint = if (noteMode) "Buy milk, call mum…" else "Reply to ${notice.title.ifEmpty { notice.appName }}"
+            if (noteMode) {
+                setText(current)
+                setSelection(current.length)
+            }
             typeface = Look.mono(context)
             textSize = 14f
             setTextColor(Look.WHITE)
@@ -113,7 +132,7 @@ class ReplyActivity : Activity() {
             }
         }
         val send = TextView(this).apply {
-            text = "SEND"
+            text = if (noteMode) "PIN" else "SEND"
             typeface = Look.monoBold(context)
             textSize = 12f
             letterSpacing = 0.06f
@@ -152,6 +171,14 @@ class ReplyActivity : Activity() {
 
     private fun send(text: String) {
         val msg = text.trim()
+        if (noteMode) {
+            val prefs = Prefs(this)
+            val had = prefs.pinnedNote.isNotBlank()
+            prefs.pinnedNote = msg.take(80)
+            IslandService.current?.showNoteChange(pinned = msg.isNotEmpty(), had = had)
+            finish()
+            return
+        }
         if (msg.isEmpty()) return
         val (_, action) = target ?: return finish()
         val input = action.reply ?: return finish()
@@ -177,6 +204,16 @@ class ReplyActivity : Activity() {
     companion object {
         /** The notification and its Reply action, handed over in-process (they don't need to survive a restart). */
         @Volatile var pending: Pair<Notice, NoticeAction>? = null
+        @Volatile private var pendingNote = false
+
+        /** The same card, for writing (or clearing) the note pinned to the island. */
+        fun openNote(ctx: android.content.Context) {
+            pendingNote = true
+            ctx.startActivity(
+                Intent(ctx, ReplyActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS),
+            )
+        }
 
         fun open(ctx: android.content.Context, notice: Notice, action: NoticeAction) {
             pending = notice to action

@@ -90,7 +90,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
 
     private enum class Mode {
         IDLE, CALL, CALL_CARD, LIVE, MEDIA, MEDIA_EXPANDED, NOTICE, CHARGING, RINGER, UNLOCK, BUDS, TOGGLES, VOLUME,
-        STATUS, PEEK, HISTORY, TIMERS, NET,
+        STATUS, PEEK, HISTORY, TIMERS, NET, CAR,
     }
 
     private sealed class Transient {
@@ -140,6 +140,16 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
     private var timersOpen = false
     private val hitTimer = Array(TIMER_CHOICES.size + 1) { RectF() }
     private val timersTimeout = Runnable { closeTimers() }
+
+    /** Car mode: long-press (or tapping music) opens three big buttons instead of the quick panel. */
+    private var carMode = false
+    private var carOpen = false
+    private val hitCar = Array(3) { RectF() }
+    private val carTimeout = Runnable { closeCar() }
+
+    /** The pinned note's row in the quick panel: tick it off, or tap the header to edit. */
+    private val hitNoteCheck = RectF()
+    private val hitNoteEdit = RectF()
     private var live: List<LiveInfo> = emptyList()
     private val liveDismissed = HashSet<String>()
     private var togglesOpen = false
@@ -307,6 +317,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
     private val hitBar = RectF()
     private val hitOpen = RectF()
     private val hitArt = RectF()
+    private val hitUpNext = RectF()
     private val hitRewind = RectF()
     private val hitForward = RectF()
     private var barLeft = 0f
@@ -638,6 +649,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             t is Transient.NetT -> Mode.NET
             historyOpen -> Mode.HISTORY
             timersOpen -> Mode.TIMERS
+            carOpen -> Mode.CAR
             togglesOpen -> Mode.TOGGLES
             mediaExpanded && mediaVisible() -> Mode.MEDIA_EXPANDED
             c != null -> if (callExpanded) Mode.CALL_CARD else Mode.CALL
@@ -659,7 +671,9 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             Mode.IDLE -> idleW to idleH
             Mode.MEDIA, Mode.CHARGING, Mode.RINGER, Mode.CALL, Mode.LIVE, Mode.UNLOCK, Mode.BUDS, Mode.STATUS, Mode.PEEK ->
                 idleW + 2 * context.dp(SIDE_DP) to idleH
-            Mode.TOGGLES, Mode.TIMERS -> bigW to idleH + context.dp(84f)
+            Mode.TOGGLES -> bigW to idleH + context.dp(if (prefs.pinnedNote.isNotBlank()) 124f else 84f)
+            Mode.TIMERS -> bigW to idleH + context.dp(84f)
+            Mode.CAR -> bigW to idleH + context.dp(96f)
             Mode.NOTICE -> bigW to idleH + noticeExtra.roundToInt() + context.dp(
                 if ((t as? Transient.NoticeT)?.notice?.actions?.isNotEmpty() == true) 104f else 60f,
             )
@@ -701,6 +715,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             Mode.VOLUME -> Mode.VOLUME
             Mode.TOGGLES -> Mode.TOGGLES
             Mode.TIMERS -> Mode.TIMERS
+            Mode.CAR -> "car" + media?.playing
             Mode.IDLE -> Mode.IDLE
         }
         if (mode != pendingMode || token != pendingToken) {
@@ -847,7 +862,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         canvas.save()
         canvas.clipRect(pillRect)
         when (shownMode) {
-            Mode.IDLE -> drawPrivacyDot(canvas, alpha)
+            Mode.IDLE -> { drawPrivacyDot(canvas, alpha); drawNoteDot(canvas, alpha) }
             Mode.MEDIA -> drawMediaCompact(canvas, alpha)
             Mode.CALL -> drawCall(canvas, alpha)
             Mode.CALL_CARD -> drawCallCard(canvas, alpha)
@@ -861,6 +876,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             Mode.BUDS -> (shownTransient as? Transient.BudsT)?.let { drawBuds(canvas, it.battery, it.name, alpha) }
             Mode.TOGGLES -> drawToggles(canvas, alpha)
             Mode.TIMERS -> drawTimers(canvas, alpha)
+            Mode.CAR -> drawCar(canvas, alpha)
             Mode.VOLUME -> (shownTransient as? Transient.VolumeT)?.let { drawVolume(canvas, it, alpha) }
             Mode.STATUS -> (shownTransient as? Transient.StatusT)?.let { drawStatus(canvas, it, alpha) }
             Mode.PEEK -> drawPeek(canvas, alpha)
@@ -1311,6 +1327,20 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         bodyPaint.alpha = alpha
         drawText(canvas, m.title, tx, top + s / 2f - context.dp(3f), avail, titlePaint)
         drawText(canvas, m.artist, tx, top + s / 2f + context.dp(17f), avail, bodyPaint)
+        // Up next, when the app shares its queue: tap it to jump there.
+        hitUpNext.setEmpty()
+        m.upNext?.let { next ->
+            val y = top + s / 2f + context.dp(37f)
+            labelPaint.alpha = alpha
+            val tag = "NEXT "
+            val tagW = labelPaint.measureText(tag)
+            drawText(canvas, tag, tx, y, tagW + 1f, labelPaint, centerY = true)
+            val size = bodyPaint.textSize
+            bodyPaint.textSize = size * 0.86f
+            drawText(canvas, next, tx + tagW + context.dp(2f), y, avail - tagW - context.dp(2f), bodyPaint, centerY = true)
+            bodyPaint.textSize = size
+            hitUpNext.set(tx - context.dp(4f), y - context.dp(12f), tx + avail, y + context.dp(12f))
+        }
         hitOpen.set(tx, box.top, pillRect.right - pad, box.bottom)
 
         // Progress: a row of dots, played in white, the playhead in red. Drag it to scrub.
@@ -1572,6 +1602,87 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
 
     private fun ease(t: Float) = 1f - (1f - t) * (1f - t) * (1f - t)
 
+    // ---- Car mode ------------------------------------------------------------------------------------------
+
+    fun setCarMode(on: Boolean) {
+        if (carMode == on) return
+        carMode = on
+        if (!on) closeCar()
+        if (canShowTransient()) showTransient(Transient.StatusT(Glyph.CAR, if (on) "CAR MODE" else "CAR OFF", on), 2000)
+    }
+
+    private fun openCar() {
+        carOpen = true
+        togglesOpen = false
+        historyOpen = false
+        timersOpen = false
+        mediaExpanded = false
+        buzz()
+        handler.removeCallbacks(carTimeout)
+        handler.postDelayed(carTimeout, 8000)
+        resolve()
+    }
+
+    private fun closeCar() {
+        handler.removeCallbacks(carTimeout)
+        if (!carOpen) return
+        carOpen = false
+        resolve()
+    }
+
+    /** Three big round buttons you can hit without looking: previous, play / pause, next. */
+    private fun drawCar(canvas: Canvas, alpha: Int) {
+        val m = media
+        drawHeader(canvas, m?.title?.ifEmpty { null } ?: "Car", "CAR", alpha)
+        val cy = pillRect.top + topZone + context.dp(46f)
+        val step = (pillRect.width() - context.dp(40f)) / 3f
+        val r = min(context.dp(32f), step / 2f - context.dp(6f))
+        val playing = m?.playing == true
+        for (i in 0 until 3) {
+            val cx = pillRect.left + context.dp(20f) + step * (i + 0.5f)
+            val main = i == 1
+            dotPaint.color = if (main) Look.WHITE else Look.RAISED
+            dotPaint.alpha = alpha
+            canvas.drawCircle(cx, cy, if (main) r else r * 0.82f, dotPaint)
+            val g = when (i) {
+                0 -> Glyph.PREV
+                1 -> if (playing) Glyph.PAUSE else Glyph.PLAY
+                else -> Glyph.NEXT
+            }
+            glyphPaint.color = if (main) Look.BLACK else Look.WHITE
+            glyphPaint.alpha = alpha
+            val gs = context.dp(if (main) 20f else 16f)
+            g.draw(canvas, cx - g.width(gs) / 2f, cy, gs, glyphPaint)
+            hitCar[i].set(cx - step / 2f, cy - r - context.dp(10f), cx + step / 2f, cy + r + context.dp(10f))
+        }
+    }
+
+    private fun tapCar(x: Float, y: Float) {
+        val i = hitCar.indexOfFirst { it.contains(x, y) }
+        val tc = media?.controller?.transportControls
+        if (i < 0 || tc == null) {
+            closeCar()
+            return
+        }
+        buzz()
+        when (i) {
+            0 -> tc.skipToPrevious()
+            1 -> if (media?.playing == true) tc.pause() else tc.play()
+            else -> tc.skipToNext()
+        }
+        handler.removeCallbacks(carTimeout)
+        handler.postDelayed(carTimeout, 8000)
+        invalidate()
+    }
+
+    /** A pinned note waits: a small dot inside the idle pill's left end. */
+    private fun drawNoteDot(canvas: Canvas, alpha: Int) {
+        if (prefs.pinnedNote.isBlank()) return
+        dotPaint.color = Look.WHITE
+        dotPaint.alpha = alpha
+        canvas.drawCircle(pillRect.left + pillRect.height() / 2f, pillRect.top + topZone / 2f, context.dp(2.2f), dotPaint)
+    }
+
     // ---- Timers --------------------------------------------------------------------------------------------
 
     private fun openTimers() {
@@ -1666,9 +1777,31 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
 
     /** Long-press panel: torch, sound mode, rotation and settings, as dot-matrix buttons. */
     private fun drawToggles(canvas: Canvas, alpha: Int) {
-        drawHeader(canvas, "Quick", null, alpha)
+        val note = prefs.pinnedNote.trim()
+        drawHeader(canvas, "Quick", if (note.isEmpty()) "+ NOTE" else "EDIT NOTE", alpha)
+        hitNoteEdit.set(pillRect.centerX() + idleHalf, pillRect.top, pillRect.right, pillRect.top + topZone)
         val q = host.quickState()
-        val cy = pillRect.top + topZone + context.dp(26f)
+        var cy = pillRect.top + topZone + context.dp(26f)
+        hitNoteCheck.setEmpty()
+        if (note.isNotEmpty()) {
+            // The pinned note, with a ring to tick it off.
+            val ny = pillRect.top + topZone + context.dp(18f)
+            val left = pillRect.left + context.dp(22f)
+            glyphPaint.color = Look.accent; glyphPaint.alpha = alpha
+            val gs = context.dp(11f)
+            Glyph.LIST.draw(canvas, left, ny, gs, glyphPaint)
+            val cr = context.dp(10f)
+            val ccx = pillRect.right - context.dp(26f)
+            dotPaint.color = Look.RAISED; dotPaint.alpha = alpha
+            canvas.drawCircle(ccx, ny, cr, dotPaint)
+            glyphPaint.color = Look.WHITE
+            Glyph.CHECK.draw(canvas, ccx - Glyph.CHECK.width(gs * 0.8f) / 2f, ny, gs * 0.8f, glyphPaint)
+            hitNoteCheck.set(ccx - cr * 2f, ny - cr * 2f, ccx + cr * 2f, ny + cr * 2f)
+            titlePaint.alpha = alpha
+            val tx = left + Glyph.LIST.width(gs) + context.dp(10f)
+            drawText(canvas, note, tx, ny, ccx - cr - context.dp(10f) - tx, titlePaint, centerY = true)
+            cy += context.dp(40f)
+        }
         val buttons = quickButtons()
         val count = buttons.size
         // Five at most, spread with room to breathe inside the pill's rounded ends.
@@ -1859,7 +1992,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         override fun onLongPress(e: MotionEvent) {
             when (shownMode) {
                 // Long-press the pill (idle, music, call or a live activity) for quick toggles.
-                Mode.IDLE, Mode.MEDIA, Mode.CALL, Mode.LIVE -> openToggles()
+                Mode.IDLE, Mode.MEDIA, Mode.CALL, Mode.LIVE -> if (carMode && media != null) openCar() else openToggles()
                 else -> Unit
             }
         }
@@ -1885,6 +2018,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             if (callExpanded) { callExpanded = false; resolve() }
             closeHistory()
             closeTimers()
+            closeCar()
             closeToggles()
             return false
         }
@@ -1920,7 +2054,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         }
         when (shownMode) {
             Mode.IDLE -> { springScale.target = 1.06f; kick(); handler.postDelayed({ springScale.target = 1f; kick() }, 120) }
-            Mode.MEDIA -> { mediaExpanded = true; buzz(); resolve() }
+            Mode.MEDIA -> if (carMode) openCar() else { mediaExpanded = true; buzz(); resolve() }
             Mode.CALL -> {
                 // Open it up to reach the hang-up button.
                 callExpanded = true
@@ -1948,12 +2082,27 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             }
             Mode.TOGGLES -> tapToggles(x, y)
             Mode.TIMERS -> tapTimers(x, y)
+            Mode.CAR -> tapCar(x, y)
         }
     }
 
     private fun quickButtons() = Quick.parse(prefs.quickButtons)
 
     private fun tapToggles(x: Float, y: Float) {
+        if (hitNoteEdit.contains(x, y)) {
+            buzz()
+            closeToggles()
+            ReplyActivity.openNote(context)
+            return
+        }
+        if (!hitNoteCheck.isEmpty && hitNoteCheck.contains(x, y)) {
+            // Ticked off: gone, with a little DONE.
+            buzz()
+            prefs.pinnedNote = ""
+            closeToggles()
+            showTransient(Transient.StatusT(Glyph.CHECK, "DONE", true), 1600)
+            return
+        }
         val hit = hitQuick.indexOfFirst { it.contains(x, y) }
         if (hit < 0) {
             closeToggles()
@@ -2126,6 +2275,14 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         val m = media ?: return
         val tc = m.controller?.transportControls
         when {
+            m.upNextId >= 0 && hitUpNext.contains(x, y) -> {
+                buzz()
+                try {
+                    tc?.skipToQueueItem(m.upNextId)
+                } catch (_: Exception) {
+                    tc?.skipToNext()
+                }
+            }
             hitPlay.contains(x, y) -> {
                 if (tc != null) {
                     if (m.playing) tc.pause() else tc.play()
@@ -2175,6 +2332,7 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
             }
             Mode.TOGGLES -> { closeToggles(); return }
             Mode.TIMERS -> { closeTimers(); return }
+            Mode.CAR -> { closeCar(); return }
             Mode.IDLE -> Unit
         }
         resolve()

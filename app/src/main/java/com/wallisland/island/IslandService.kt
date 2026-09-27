@@ -496,6 +496,14 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         }
     }
 
+    /** The pinned note was written or cleared in the note card. */
+    fun showNoteChange(pinned: Boolean, had: Boolean) {
+        when {
+            pinned -> island?.showStatus(Glyph.LIST, "PINNED", true)
+            had -> island?.showStatus(Glyph.LIST, "UNPINNED", false)
+        }
+    }
+
     /** A reply typed in the reply card went out. */
     fun showSent() {
         island?.showStatus(Glyph.CHECK, "SENT", true)
@@ -1008,6 +1016,17 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         if (view == null) IslandHub.unlockLog += ": skipped, island window not created" else view.showUnlock()
     }
 
+    // ---- Car mode ------------------------------------------------------------------------------------------
+
+    private var carDevice: String? = null
+    private var carAuto = false
+
+    /** Connected to the car (its Bluetooth, or Android Auto): big, simple controls. */
+    private fun setCar(on: Boolean) {
+        val want = prefs.carMode && (on || carAuto || carDevice != null)
+        island?.setCarMode(want)
+    }
+
     // ---- Earbuds ---------------------------------------------------------------------------------------------
 
     private var budsShownAt = 0L
@@ -1026,6 +1045,24 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
             false
         }
         if (!audio) return
+        // A car stereo or hands-free kit: car mode, not an earbuds pop-up.
+        val car = try {
+            val c = device.bluetoothClass?.deviceClass
+            c == android.bluetooth.BluetoothClass.Device.AUDIO_VIDEO_CAR_AUDIO ||
+                c == android.bluetooth.BluetoothClass.Device.AUDIO_VIDEO_HANDSFREE
+        } catch (_: Exception) {
+            false
+        }
+        if (car) {
+            when (intent.action) {
+                android.bluetooth.BluetoothDevice.ACTION_ACL_CONNECTED -> { carDevice = device.address; setCar(true) }
+                android.bluetooth.BluetoothDevice.ACTION_ACL_DISCONNECTED -> if (carDevice == device.address) {
+                    carDevice = null
+                    setCar(false)
+                }
+            }
+            return
+        }
         when (intent.action) {
             android.bluetooth.BluetoothDevice.ACTION_ACL_CONNECTED -> {
                 // The audio-device callback shows the pop-up; if it already did, add the battery.
@@ -1379,7 +1416,10 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
                         android.bluetooth.BluetoothAdapter.STATE_OFF -> island?.showStatus(Glyph.BLUETOOTH, "OFF", false)
                     }
                 }
-                android.bluetooth.BluetoothDevice.ACTION_ACL_CONNECTED, ACTION_BT_BATTERY -> onBluetooth(intent)
+                android.bluetooth.BluetoothDevice.ACTION_ACL_CONNECTED, android.bluetooth.BluetoothDevice.ACTION_ACL_DISCONNECTED,
+                ACTION_BT_BATTERY -> onBluetooth(intent)
+                android.app.UiModeManager.ACTION_ENTER_CAR_MODE -> { carAuto = true; setCar(true) }
+                android.app.UiModeManager.ACTION_EXIT_CAR_MODE -> { carAuto = false; setCar(false) }
             }
         }
     }
@@ -1394,6 +1434,9 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
             addAction(AudioManager.RINGER_MODE_CHANGED_ACTION)
             addAction(Intent.ACTION_USER_PRESENT)
             addAction(android.bluetooth.BluetoothDevice.ACTION_ACL_CONNECTED)
+            addAction(android.bluetooth.BluetoothDevice.ACTION_ACL_DISCONNECTED)
+            addAction(android.app.UiModeManager.ACTION_ENTER_CAR_MODE)
+            addAction(android.app.UiModeManager.ACTION_EXIT_CAR_MODE)
             addAction(ACTION_BT_BATTERY)
             addAction(android.app.NotificationManager.ACTION_INTERRUPTION_FILTER_CHANGED)
             addAction(android.net.wifi.WifiManager.WIFI_STATE_CHANGED_ACTION)

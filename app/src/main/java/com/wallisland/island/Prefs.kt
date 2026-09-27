@@ -54,6 +54,14 @@ class Prefs(context: Context) {
     /** Steps in the double-tap peek: the goal, and the counter reading today started from. */
     var showSteps by bool("show_steps", true)
 
+    /** Car mode when connected to the car's Bluetooth or Android Auto. */
+    var carMode by bool("car_mode", true)
+
+    /** A short note pinned to the island (empty = none). */
+    var pinnedNote: String
+        get() = sp.getString("pinned_note", "") ?: ""
+        set(v) = sp.edit().putString("pinned_note", v).apply()
+
     /** Two things at once: the second gets its own bubble beside the pill. */
     var splitIsland by bool("split_island", true)
     var stepGoal by int("step_goal", 10_000)
