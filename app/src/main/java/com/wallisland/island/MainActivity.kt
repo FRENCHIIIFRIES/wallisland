@@ -397,7 +397,12 @@ class MainActivity : Activity() {
             // No standard key code: recognised by its hardware scan code instead.
             scan > 0 -> "Learned: hardware key $scan (no standard key code, matched by scan code)"
             else -> "Learned by an older build without its scan code. Tap Learn and press the key again."
-        }
+        } + essentialAppLine()
+    }
+
+    private fun essentialAppLine(): String {
+        val pkg = prefs.essentialSpacePkg
+        return if (pkg.isEmpty()) "" else "\nOpens: ${IslandNotificationListener.appLabel(this, pkg)} ($pkg)"
     }
 
     private fun buildEssentialKey(col: LinearLayout) {
@@ -419,10 +424,20 @@ class MainActivity : Activity() {
         card.addView(keyActionRow("Short press", short = true))
         card.addView(divider())
         card.addView(keyActionRow("Long press", short = false))
+        card.addView(divider())
+        card.addView(toggleRow(
+            "Stop Essential Space",
+            "When a remapped press opens it, close it straight away. A capture may still be saved there.",
+            prefs.closeEssentialSpace,
+        ) { prefs.closeEssentialSpace = it })
         col.addView(card)
         col.addView(hint(
             "Uses \"Show above status bar\" (Accessibility). If Learn never sees the key, Nothing OS handles it " +
-                "before apps can, and it can't be remapped. Leave both on Default to keep Essential Space."
+                "before apps can, and it can't be remapped. Leave both on Default to keep Essential Space.\n\n" +
+                "To switch Essential Space off completely (no capture saved), run from a computer once:\n" +
+                "adb shell pm disable-user --user 0 com.nothing.ntessentialspace\n" +
+                "adb shell pm disable-user --user 0 com.nothing.ntessentialrecorder\n" +
+                "Undo with pm enable instead of pm disable-user."
         ))
     }
 
@@ -439,6 +454,7 @@ class MainActivity : Activity() {
             startSafely(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             return
         }
+        IslandAccessibilityService.onLearnedApp = { keyStatus.text = keyStatusText() }
         IslandAccessibilityService.onLearned = { code ->
             keyStatus.removeCallbacks(learnTimeout)
             keyStatus.text = keyStatusText()
@@ -552,6 +568,10 @@ class MainActivity : Activity() {
             else android.view.KeyEvent.keyCodeToString(prefs.essentialKey) + ", scan ${prefs.essentialScan}"
         )
         append(" · Accessibility: ").append(if (IslandAccessibilityService.instance != null) "on" else "off")
+        append("\nEssential Space app: ").append(prefs.essentialSpacePkg.ifEmpty { "not seen yet" })
+        append(" · ").append(IslandAccessibilityService.lastClosed)
+        append("\nVolume in island: ").append(if (prefs.volumeInIsland) "on" else "off")
+        append(" · last press: ").append(IslandService.lastVolume)
         append("\n\nAndroid ").append(Build.VERSION.RELEASE).append(" · ").append(Build.MANUFACTURER)
             .append(' ').append(Build.MODEL).append(" · build ").append(Updater.currentBuild(this@MainActivity))
     }

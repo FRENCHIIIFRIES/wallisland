@@ -45,7 +45,8 @@ design language: black, white, one red, and dots everywhere.
   settings.
 - **Volume in the island.** With *Show above status bar* on, the volume keys drive a dot-matrix
   volume bar in the island instead of the system panel (it falls back to the normal panel while
-  the island is hidden or the phone is ringing).
+  the island is hidden or the phone is ringing). Presses are routed like the hardware keys (media,
+  calls, Cast); if that ever moves nothing, the island adjusts the volume directly instead.
 - **Toggle confirmations.** Do Not Disturb, Wi-Fi and Bluetooth flash ON / OFF with a dot icon.
 - **Buttons and quick replies.** Notifications show the app's own buttons (Mark as read, Like…) and
   one-tap replies (👍, "On my way") sent straight through the app's Reply.
@@ -59,7 +60,11 @@ design language: black, white, one red, and dots everywhere.
 - **Essential Key remap.** Settings → *Essential Key* → **Learn**, press the key, then choose short
   and long press actions: torch, play/pause, quick toggles, screenshot, camera, Assistant, sound
   mode, focus timer or any app. Uses the accessibility service; if Learn never sees the key, the
-  phone handles it before apps can.
+  phone handles it before apps can. Nothing OS still opens Essential Space itself, so with
+  **Stop Essential Space** on (the default) the island closes it the moment a remapped press opens
+  it. To turn Essential Space off completely, so it saves no capture, run once from a computer:
+  `adb shell pm disable-user --user 0 com.nothing.ntessentialspace` and the same for
+  `com.nothing.ntessentialrecorder` (`pm enable` undoes it).
 - **Per-app control.** *Apps that can pop up* lets you turn island notifications off app by app.
 - **Accent colour.** Swap the Nothing red for orange, yellow, green, blue, purple, pink or white.
 - **Charging and low battery.** A five-dot gauge and the percentage in Doto. It turns red at 20%.

@@ -30,7 +30,67 @@ class IslandAccessibilityService : AccessibilityService() {
         IslandService.onHostChanged(this)
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    // ---- Keeping Essential Space closed -----------------------------------------------------------------
+
+    /** When the Essential Key was last pressed or released, and until when opening apps are noted (Learn). */
+    private var essentialPressedAt = 0L
+    private var learnAppUntil = 0L
+    private var learnedApp: String? = null
+    private var closedThisPress = 0
+
+    /**
+     * Nothing OS opens Essential Space itself before any app sees the key. When the key is remapped, close
+     * it the moment its window appears (only within a couple of seconds of a press, so opening Essential
+     * Space any other way still works). Only the package name is read, never window content.
+     */
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+        val pkg = event.packageName?.toString() ?: return
+        if (pkg == packageName) return
+        val now = SystemClock.uptimeMillis()
+
+        if (now < learnAppUntil) noteLearnedApp(pkg)
+
+        if (!prefs.closeEssentialSpace || !remapped()) return
+        if (now - essentialPressedAt > CLOSE_WINDOW_MS || closedThisPress >= 3) return
+        if (!isEssentialSpace(pkg)) return
+        closedThisPress++
+        performGlobalAction(GLOBAL_ACTION_BACK)
+        val time = java.text.DateFormat.getTimeInstance(java.text.DateFormat.MEDIUM).format(java.util.Date())
+        lastClosed = "closed $pkg at $time"
+    }
+
+    /** The first app that opens after Learn, unless a later one is plainly Essential Space. */
+    private fun noteLearnedApp(pkg: String) {
+        if (!learnable(pkg)) return
+        val current = learnedApp
+        if (current != null && (isEssentialName(current) || !isEssentialName(pkg))) return
+        learnedApp = pkg
+        prefs.essentialSpacePkg = pkg
+        main.post { onLearnedApp?.invoke(pkg) }
+    }
+
+    /** The home screen and the system UI open around a key press too; they're never Essential Space. */
+    private fun learnable(pkg: String): Boolean {
+        if (pkg == "android" || pkg == "com.android.systemui" || "launcher" in pkg.lowercase()) return false
+        val home = try {
+            packageManager.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0)
+                ?.activityInfo?.packageName
+        } catch (_: Exception) {
+            null
+        }
+        return pkg != home
+    }
+
+    private fun remapped() =
+        KeyAction.of(prefs.essentialShort) != KeyAction.DEFAULT || KeyAction.of(prefs.essentialLong) != KeyAction.DEFAULT
+
+    private fun isEssentialSpace(pkg: String): Boolean {
+        val learned = prefs.essentialSpacePkg
+        return (learned.isNotEmpty() && pkg == learned) || isEssentialName(pkg)
+    }
+
+    private fun isEssentialName(pkg: String) = pkg in ESSENTIAL_APPS || "essential" in pkg.lowercase()
 
     override fun onInterrupt() {}
 
@@ -64,6 +124,9 @@ class IslandAccessibilityService : AccessibilityService() {
 
         // "Learn key": the next key that isn't a standard button becomes the Essential Key.
         if (learning && code !in SYSTEM_KEYS) {
+            // Whatever opens around this press is the app the key launches (Essential Space).
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) learnedApp = null
+            learnAppUntil = SystemClock.uptimeMillis() + CLOSE_WINDOW_MS
             if (event.action == KeyEvent.ACTION_UP) {
                 learning = false
                 prefs.essentialKey = code
@@ -73,7 +136,14 @@ class IslandAccessibilityService : AccessibilityService() {
             return true
         }
 
-        if (isEssential(event)) return essential(event)
+        if (isEssential(event)) {
+            if (event.repeatCount == 0) {
+                if (event.action == KeyEvent.ACTION_DOWN) closedThisPress = 0
+                // Timed from release too, so a long hold still gets Essential Space closed.
+                essentialPressedAt = SystemClock.uptimeMillis()
+            }
+            return essential(event)
+        }
 
         if (code == KeyEvent.KEYCODE_VOLUME_UP || code == KeyEvent.KEYCODE_VOLUME_DOWN) return volume(event)
         return false
@@ -160,6 +230,12 @@ class IslandAccessibilityService : AccessibilityService() {
     companion object {
         private const val LONG_PRESS_MS = 500L
 
+        /** How long after a key press a newly opened Essential Space window is closed. */
+        private const val CLOSE_WINDOW_MS = 2500L
+
+        /** Nothing OS's Essential Space and its voice recorder. */
+        val ESSENTIAL_APPS = setOf("com.nothing.ntessentialspace", "com.nothing.ntessentialrecorder")
+
         /** Keys never taken as the Essential Key while learning. */
         private val SYSTEM_KEYS = setOf(
             KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN, KeyEvent.KEYCODE_POWER,
@@ -172,6 +248,10 @@ class IslandAccessibilityService : AccessibilityService() {
         /** Set by settings while waiting for the user to press the Essential Key. */
         @Volatile var learning = false
         var onLearned: ((Int) -> Unit)? = null
+        var onLearnedApp: ((String) -> Unit)? = null
+
+        /** What the Essential Space blocker last did, for Troubleshoot. */
+        @Volatile var lastClosed = "nothing closed yet"
 
         /** The last key the service saw, for Troubleshoot. */
         @Volatile var lastKey = "none yet"

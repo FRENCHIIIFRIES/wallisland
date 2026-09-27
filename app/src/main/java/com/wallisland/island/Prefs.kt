@@ -46,6 +46,14 @@ class Prefs(context: Context) {
      * KEYCODE_UNKNOWN), so it's recognised by this instead. -1 = not learned.
      */
     var essentialScan by int("essential_scan", -1)
+
+    /** Close Essential Space when the Essential Key opens it (Nothing OS opens it before apps can stop it). */
+    var closeEssentialSpace by bool("close_essential_space", true)
+
+    /** The app that opens when the key is pressed, spotted while learning. Empty = not seen yet. */
+    var essentialSpacePkg: String
+        get() = sp.getString("essential_space_pkg", "") ?: ""
+        set(v) = sp.edit().putString("essential_space_pkg", v).apply()
     var essentialShort: String
         get() = sp.getString("essential_short", KeyAction.DEFAULT.name) ?: KeyAction.DEFAULT.name
         set(v) = sp.edit().putString("essential_short", v).apply()

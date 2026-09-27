@@ -10,5 +10,5 @@
     android:canRequestFilterKeyEvents="true"
     android:canRetrieveWindowContent="false"
     android:description="@string/a11y_description"
-    android:notificationTimeout="1000"
+    android:notificationTimeout="0"
     android:settingsActivity="com.wallisland.island.MainActivity" />

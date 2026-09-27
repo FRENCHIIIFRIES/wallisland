@@ -472,18 +472,89 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         return am.mode != AudioManager.MODE_RINGTONE && island?.canShowTransient() == true
     }
 
+    /** Until when the volume keys skip the system's routing, after it was seen not to move anything. */
+    private var directVolumeUntil = 0L
+    private var volumeFallbacks = 0
+
+    /**
+     * A volume key, routed the way Android routes the hardware keys (media, calls, Cast), then shown on the
+     * island. If nothing moved although it could have, the stream is adjusted directly instead (and for a
+     * while after), so the keys never go dead.
+     */
     fun stepVolume(up: Boolean) {
         val am = getSystemService(AudioManager::class.java) ?: return
-        val stream = when (am.mode) {
-            AudioManager.MODE_IN_CALL, AudioManager.MODE_IN_COMMUNICATION -> AudioManager.STREAM_VOICE_CALL
-            else -> AudioManager.STREAM_MUSIC
+        val dir = if (up) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER
+        if (SystemClock.uptimeMillis() < directVolumeUntil) {
+            adjustDirectly(am, likelyStream(am), dir)
+            return
         }
-        try {
+        val before = VOLUME_STREAMS.map { am.getStreamVolume(it) }
+        val fallbacks = volumeFallbacks
+        val routed = try {
             // No FLAG_SHOW_UI: the island is the volume panel.
-            am.adjustStreamVolume(stream, if (up) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER, 0)
+            am.adjustSuggestedStreamVolume(dir, AudioManager.USE_DEFAULT_STREAM_TYPE, 0)
+            true
+        } catch (_: Exception) {
+            false
+        }
+        // The system applies it a moment later, on its own thread.
+        main.postDelayed({
+            // Routing was found not to work since this press: this one didn't move anything either.
+            if (volumeFallbacks != fallbacks) {
+                adjustDirectly(am, likelyStream(am), dir)
+                return@postDelayed
+            }
+            val moved = VOLUME_STREAMS.indices.firstOrNull { am.getStreamVolume(VOLUME_STREAMS[it]) != before[it] }
+            val stream = moved?.let { VOLUME_STREAMS[it] } ?: likelyStream(am)
+            when {
+                moved != null -> {
+                    lastVolume = "${streamName(stream)} ${before[moved]} → ${am.getStreamVolume(stream)}"
+                    island?.showVolume(am.getStreamVolume(stream), am.getStreamMaxVolume(stream))
+                }
+                canMove(am, stream, up) -> {
+                    volumeFallbacks++
+                    directVolumeUntil = SystemClock.uptimeMillis() + DIRECT_VOLUME_MS
+                    adjustDirectly(am, stream, dir)
+                    lastVolume += if (routed) " (system routing didn't move it)" else " (routing failed)"
+                }
+                else -> {
+                    lastVolume = "${streamName(stream)} already at its ${if (up) "maximum" else "minimum"}"
+                    island?.showVolume(am.getStreamVolume(stream), am.getStreamMaxVolume(stream))
+                }
+            }
+        }, VOLUME_READBACK_MS)
+    }
+
+    private fun adjustDirectly(am: AudioManager, stream: Int, dir: Int) {
+        val was = am.getStreamVolume(stream)
+        try {
+            am.adjustStreamVolume(stream, dir, 0)
         } catch (_: SecurityException) {
         }
-        island?.showVolume(am.getStreamVolume(stream), am.getStreamMaxVolume(stream))
+        val now = am.getStreamVolume(stream)
+        lastVolume = "${streamName(stream)} $was → $now, set directly"
+        island?.showVolume(now, am.getStreamMaxVolume(stream))
+    }
+
+    private fun likelyStream(am: AudioManager) = when (am.mode) {
+        AudioManager.MODE_IN_CALL, AudioManager.MODE_IN_COMMUNICATION -> AudioManager.STREAM_VOICE_CALL
+        else -> AudioManager.STREAM_MUSIC
+    }
+
+    private fun canMove(am: AudioManager, stream: Int, up: Boolean): Boolean {
+        val now = am.getStreamVolume(stream)
+        if (up) return now < am.getStreamMaxVolume(stream)
+        val min = if (Build.VERSION.SDK_INT >= 28) am.getStreamMinVolume(stream) else 0
+        return now > min
+    }
+
+    private fun streamName(stream: Int) = when (stream) {
+        AudioManager.STREAM_VOICE_CALL -> "call"
+        AudioManager.STREAM_MUSIC -> "media"
+        AudioManager.STREAM_RING -> "ring"
+        AudioManager.STREAM_NOTIFICATION -> "notification"
+        AudioManager.STREAM_ALARM -> "alarm"
+        else -> "stream $stream"
     }
 
     fun openToggles() {
@@ -1106,6 +1177,18 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
         const val ACTION_DEMO_REPLY = "com.wallisland.island.DEMO_REPLY"
         const val ACTION_DEMO_EVENT = "com.wallisland.island.DEMO_EVENT"
         const val ACTION_DEMO_PEEK = "com.wallisland.island.DEMO_PEEK"
+
+        /** Streams the volume keys can end up moving, checked in this order. */
+        private val VOLUME_STREAMS = intArrayOf(
+            AudioManager.STREAM_VOICE_CALL, AudioManager.STREAM_MUSIC, AudioManager.STREAM_RING,
+            AudioManager.STREAM_NOTIFICATION, AudioManager.STREAM_ALARM,
+        )
+        private const val VOLUME_READBACK_MS = 150L
+        private const val DIRECT_VOLUME_MS = 30_000L
+
+        /** What the last volume key press did, for Troubleshoot. */
+        @Volatile var lastVolume = "no volume key handled yet"
+            private set
 
         private const val FOCUS_KEY = "focus"
         private const val FOCUS_MS = 25 * 60_000L
