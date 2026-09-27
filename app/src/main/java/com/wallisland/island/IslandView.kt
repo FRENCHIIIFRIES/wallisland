@@ -61,7 +61,19 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         val focusOn: Boolean = false,
     )
 
-    enum class Quick { TORCH, RINGER, VOLUME, RECENT, ROTATE, FOCUS, SETTINGS }
+    enum class Quick(val title: String) {
+        TORCH("Torch"), RINGER("Sound mode"), VOLUME("Volume"), RECENT("Recent notifications"),
+        ROTATE("Rotation lock"), FOCUS("Focus timer");
+
+        companion object {
+            const val MAX = 5
+            val DEFAULT = listOf(TORCH, RINGER, VOLUME, RECENT, FOCUS)
+
+            fun parse(csv: String): List<Quick> =
+                csv.split(',').mapNotNull { n -> values().firstOrNull { it.name == n.trim() } }.distinct().take(MAX)
+                    .ifEmpty { DEFAULT }
+        }
+    }
 
     private enum class Mode {
         IDLE, CALL, CALL_CARD, LIVE, MEDIA, MEDIA_EXPANDED, NOTICE, CHARGING, RINGER, UNLOCK, BUDS, TOGGLES, VOLUME,
@@ -1326,14 +1338,18 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         drawHeader(canvas, "Quick", null, alpha)
         val q = host.quickState()
         val cy = pillRect.top + topZone + context.dp(26f)
-        val count = Quick.values().size
-        val step = pillRect.width() / count
-        val r = min(context.dp(21f), step / 2f - context.dp(6f))
+        val buttons = quickButtons()
+        val count = buttons.size
+        // Five at most, spread with room to breathe inside the pill's rounded ends.
+        val inset = context.dp(14f)
+        val step = (pillRect.width() - inset * 2) / count
+        val r = min(context.dp(22f), step / 2f - context.dp(8f))
         val gs = context.dp(15f)
         labelPaint.alpha = alpha
+        hitQuick.forEach { it.setEmpty() }
         for (i in 0 until count) {
-            val cx = pillRect.left + step * (i + 0.5f)
-            val (glyph, label, active) = when (Quick.values()[i]) {
+            val cx = pillRect.left + inset + step * (i + 0.5f)
+            val (glyph, label, active) = when (buttons[i]) {
                 Quick.TORCH -> Triple(Glyph.TORCH, "TORCH", q.torch)
                 Quick.RINGER -> when (q.ringerMode) {
                     AudioManager.RINGER_MODE_SILENT -> Triple(Glyph.BELL_OFF, "SILENT", true)
@@ -1344,9 +1360,8 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
                 Quick.RECENT -> Triple(Glyph.LIST, "RECENT", false)
                 Quick.ROTATE -> Triple(Glyph.ROTATE, if (q.autoRotate) "ROTATE" else "LOCKED", q.autoRotate)
                 Quick.FOCUS -> Triple(Glyph.TIMER, if (q.focusOn) "STOP" else "FOCUS", q.focusOn)
-                Quick.SETTINGS -> Triple(Glyph.GEAR, "SETUP", false)
             }
-            val dim = i == 0 && !q.torchAvailable
+            val dim = buttons[i] == Quick.TORCH && !q.torchAvailable
             dotPaint.color = if (active) Look.WHITE else Look.RAISED
             dotPaint.alpha = alpha
             canvas.drawCircle(cx, cy, r, dotPaint)
@@ -1590,19 +1605,16 @@ class IslandView(context: Context, private val prefs: Prefs, private val host: H
         }
     }
 
+    private fun quickButtons() = Quick.parse(prefs.quickButtons)
+
     private fun tapToggles(x: Float, y: Float) {
         val hit = hitQuick.indexOfFirst { it.contains(x, y) }
         if (hit < 0) {
             closeToggles()
             return
         }
-        val action = Quick.values()[hit]
+        val action = quickButtons().getOrNull(hit) ?: return closeToggles()
         buzz()
-        if (action == Quick.SETTINGS) {
-            closeToggles()
-            host.openSettings()
-            return
-        }
         if (action == Quick.RECENT) {
             closeToggles()
             openHistory(fromTap = true)

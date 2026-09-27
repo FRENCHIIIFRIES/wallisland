@@ -44,8 +44,8 @@ design language: black, white, one red, and dots everywhere.
 - **Unlock.** A dot padlock opens and a tick lands when you unlock the phone.
 - **Earbuds.** When Bluetooth headphones connect, the island shows their battery (needs the optional
   Nearby devices permission).
-- **Quick toggles.** Long-press the island for torch, ring / vibrate / silent, volume, rotation
-  lock, a focus timer and settings.
+- **Quick toggles.** Long-press the island for five big buttons: torch, ring / vibrate / silent,
+  volume, recent notifications and a focus timer. Swap any for rotation lock in *Quick panel buttons*.
 - **Volume in the island.** With *Show above status bar* on, the volume keys drive a dot-matrix
   volume bar in the island instead of the system panel (it falls back to the normal panel while
   the island is hidden or the phone is ringing). Slide sideways on the bar to set the volume by

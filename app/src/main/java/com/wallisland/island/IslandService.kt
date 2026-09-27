@@ -810,7 +810,6 @@ class IslandService : Service(), IslandHub.Listener, IslandView.Host,
             IslandView.Quick.FOCUS -> toggleFocus()
             IslandView.Quick.VOLUME -> openVolumeBar()
             IslandView.Quick.RECENT -> Unit // handled by the island itself
-            IslandView.Quick.SETTINGS -> openSettings()
         }
         island?.refreshQuick()
     }

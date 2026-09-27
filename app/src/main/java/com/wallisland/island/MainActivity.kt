@@ -91,6 +91,31 @@ class MainActivity : Activity() {
         IslandService.current?.refreshPopups()
     }
 
+    /** Choose which buttons the long-press panel shows (up to five), in their fixed order. */
+    private fun pickQuickButtons() {
+        val all = IslandView.Quick.values()
+        val chosen = IslandView.Quick.parse(prefs.quickButtons).toMutableSet()
+        val checked = BooleanArray(all.size) { all[it] in chosen }
+        val dialog = android.app.AlertDialog.Builder(this)
+            .setTitle("Quick panel (up to ${IslandView.Quick.MAX})")
+            .setMultiChoiceItems(all.map { it.title }.toTypedArray(), checked) { d, which, on ->
+                if (on && checked.count { it } > IslandView.Quick.MAX) {
+                    checked[which] = false
+                    (d as android.app.AlertDialog).listView.setItemChecked(which, false)
+                    toast("Five at most, so it stays tidy")
+                    return@setMultiChoiceItems
+                }
+                checked[which] = on
+            }
+            .setPositiveButton("Save") { _, _ ->
+                val picked = all.filterIndexed { i, _ -> checked[i] }
+                prefs.quickButtons = (picked.ifEmpty { IslandView.Quick.DEFAULT }).joinToString(",") { it.name }
+            }
+            .setNegativeButton("Cancel", null)
+            .create()
+        dialog.show()
+    }
+
     private var popupsRow: View? = null
 
     private fun popupsText(): String = when {
@@ -309,6 +334,8 @@ class MainActivity : Activity() {
         card.addView(toggleRow("Edge light", "Dots race around the island when a notification arrives", prefs.edgeLight) { prefs.edgeLight = it })
         card.addView(divider())
         card.addView(toggleRow("Calendar events", "A countdown 10 minutes before each event", prefs.showEvents) { prefs.showEvents = it })
+        card.addView(divider())
+        card.addView(linkRow("Quick panel buttons", "Long-press the island. Pick up to five") { pickQuickButtons() })
         card.addView(divider())
         card.addView(toggleRow("Weather", "Double-tap the pill: time, battery and the weather", prefs.showWeather) { prefs.showWeather = it })
         card.addView(divider())

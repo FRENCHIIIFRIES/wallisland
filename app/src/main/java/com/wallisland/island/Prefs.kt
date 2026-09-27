@@ -31,6 +31,11 @@ class Prefs(context: Context) {
     var autoAlign by bool("auto_align", true)
     var hideWhileCapturing by bool("hide_capturing", true)
 
+    /** The long-press panel's buttons, in order (names of IslandView.Quick), five at most. */
+    var quickButtons: String
+        get() = sp.getString("quick_buttons", null) ?: IslandView.Quick.DEFAULT.joinToString(",") { it.name }
+        set(v) = sp.edit().putString("quick_buttons", v).apply()
+
     /** Weather beside the time in the double-tap peek, and the rough spot it's for. */
     var showWeather by bool("show_weather", true)
     var weatherLat: String
